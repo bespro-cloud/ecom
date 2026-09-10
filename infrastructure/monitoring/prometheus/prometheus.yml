@@ -1,0 +1,52 @@
+# Prometheus scrape configuration.
+#
+# The API and worker both expose /health/metrics. Series cardinality is kept
+# deliberately low — routes are recorded as matched patterns, never concrete
+# URLs — so an order id in a path cannot blow up the time-series database.
+
+global:
+  scrape_interval: 15s
+  scrape_timeout: 10s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: health-commerce
+    environment: ${ENVIRONMENT}
+
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ['alertmanager:9093']
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ['localhost:9090']
+
+  - job_name: api
+    metrics_path: /health/metrics
+    static_configs:
+      - targets: ['api:4000']
+        labels:
+          service: api
+
+  - job_name: worker
+    metrics_path: /health/metrics
+    static_configs:
+      - targets: ['worker:4100']
+        labels:
+          service: worker
+
+  - job_name: postgres
+    static_configs:
+      - targets: ['postgres-exporter:9187']
+
+  - job_name: redis
+    static_configs:
+      - targets: ['redis-exporter:9121']
+
+  - job_name: nginx
+    static_configs:
+      - targets: ['nginx-exporter:9113']

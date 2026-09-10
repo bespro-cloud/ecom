@@ -1,0 +1,89 @@
+# Alerting rules.
+#
+# Each alert names something a person can act on. Anything that would fire
+# without a corresponding action belongs on a dashboard, not in here.
+
+groups:
+  - name: availability
+    interval: 30s
+    rules:
+      - alert: ServiceDown
+        expr: up{job=~"api|worker"} == 0
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: '{{ $labels.job }} is not responding to scrapes'
+          runbook: docs/operations/RUNBOOK.md#service-down
+
+      - alert: HighErrorRate
+        expr: |
+          sum(rate(http_requests_total{status=~"5.."}[5m])) by (service)
+            / sum(rate(http_requests_total[5m])) by (service) > 0.02
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: 'More than 2% of requests to {{ $labels.service }} are failing'
+          runbook: docs/operations/RUNBOOK.md#elevated-error-rate
+
+      - alert: SlowResponses
+        expr: |
+          histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, service)) > 1.5
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: '95th percentile latency for {{ $labels.service }} is above 1.5s'
+
+  - name: security
+    interval: 30s
+    rules:
+      # A single reuse event is a credible sign of a stolen refresh token.
+      - alert: RefreshTokenReuseDetected
+        expr: increase(auth_events_total{event="refresh",outcome="reuse_detected"}[15m]) > 0
+        for: 0m
+        labels: { severity: critical }
+        annotations:
+          summary: 'A refresh token was replayed — the session family was revoked'
+          runbook: docs/operations/RUNBOOK.md#refresh-token-reuse
+
+      - alert: LoginFailureSpike
+        expr: |
+          sum(rate(auth_events_total{event="login",outcome="failure"}[5m]))
+            > 5 * sum(rate(auth_events_total{event="login",outcome="success"}[5m])) + 1
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: 'Failed sign-ins greatly exceed successful ones — possible credential stuffing'
+
+      - alert: AuditWriteFailure
+        expr: increase(audit_writes_total{outcome="WRITE_FAILED"}[10m]) > 0
+        for: 0m
+        labels: { severity: critical }
+        annotations:
+          summary: 'The audit trail could not be written — regulatory record at risk'
+          runbook: docs/operations/RUNBOOK.md#audit-write-failure
+
+      - alert: MfaEnrollmentOverdue
+        expr: increase(auth_events_total{event="login",outcome="mfa_enrollment_overdue"}[1h]) > 0
+        for: 0m
+        labels: { severity: warning }
+        annotations:
+          summary: 'A privileged account was refused sign-in for not enrolling MFA in time'
+
+  - name: workers
+    interval: 30s
+    rules:
+      - alert: OutboxBacklog
+        expr: outbox_pending_messages > 500
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: 'The transactional outbox is not draining — events are not reaching the queues'
+          runbook: docs/operations/RUNBOOK.md#outbox-backlog
+
+      - alert: DeadLetterQueueGrowing
+        expr: increase(queue_dead_lettered_total[30m]) > 5
+        for: 0m
+        labels: { severity: warning }
+        annotations:
+          summary: 'Jobs are being dead-lettered on {{ $labels.queue }}'
+          runbook: docs/operations/RUNBOOK.md#dead-letter-queue

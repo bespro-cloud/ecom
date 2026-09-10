@@ -1,0 +1,11 @@
+apiVersion: 1
+
+providers:
+  - name: 'Health Commerce'
+    orgId: 1
+    folder: 'Health Commerce'
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    options:
+      path: /var/lib/grafana/dashboards

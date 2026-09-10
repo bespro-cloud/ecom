@@ -1,0 +1,189 @@
+name: Deploy
+
+# Build once, deploy the same immutable image to staging and then production.
+# Nothing is rebuilt between environments — the artefact that passed staging is
+# the artefact that reaches customers.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        required: true
+        default: staging
+        type: choice
+        options: [staging, production]
+
+concurrency:
+  # Never two deploys to the same environment at once.
+  group: deploy-${{ github.event.inputs.environment || 'production' }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ghcr.io/${{ github.repository }}
+
+jobs:
+  # ---------------------------------------------------------------------------
+  build-images:
+    name: Build and publish images
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: meta
+        name: Derive an immutable tag
+        # The commit sha, never `latest`: a deployed version must be
+        # identifiable after the fact.
+        run: echo "tag=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build the API image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infrastructure/docker/api.Dockerfile
+          push: true
+          tags: ${{ env.IMAGE_PREFIX }}-api:${{ steps.meta.outputs.tag }}
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,scope=api,mode=max
+          provenance: true
+          sbom: true
+
+      - name: Build the worker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infrastructure/docker/worker.Dockerfile
+          push: true
+          tags: ${{ env.IMAGE_PREFIX }}-worker:${{ steps.meta.outputs.tag }}
+          cache-from: type=gha,scope=worker
+          cache-to: type=gha,scope=worker,mode=max
+          provenance: true
+          sbom: true
+
+      - name: Build the storefront image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infrastructure/docker/web.Dockerfile
+          push: true
+          tags: ${{ env.IMAGE_PREFIX }}-storefront:${{ steps.meta.outputs.tag }}
+          build-args: |
+            APP=storefront
+            PORT=3000
+            NEXT_PUBLIC_SITE_URL=${{ vars.STOREFRONT_PUBLIC_URL }}
+            NEXT_PUBLIC_SITE_NAME=${{ vars.SITE_NAME }}
+          cache-from: type=gha,scope=storefront
+          cache-to: type=gha,scope=storefront,mode=max
+
+      - name: Build the admin image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infrastructure/docker/web.Dockerfile
+          push: true
+          tags: ${{ env.IMAGE_PREFIX }}-admin:${{ steps.meta.outputs.tag }}
+          build-args: |
+            APP=admin
+            PORT=3001
+            NEXT_PUBLIC_ADMIN_URL=${{ vars.ADMIN_PUBLIC_URL }}
+          cache-from: type=gha,scope=admin
+          cache-to: type=gha,scope=admin,mode=max
+
+      - name: Scan images for known vulnerabilities
+        uses: aquasecurity/trivy-action@0.29.0
+        with:
+          image-ref: ${{ env.IMAGE_PREFIX }}-api:${{ steps.meta.outputs.tag }}
+          severity: HIGH,CRITICAL
+          exit-code: '1'
+          ignore-unfixed: true
+
+  # ---------------------------------------------------------------------------
+  staging:
+    name: Deploy to staging
+    needs: build-images
+    runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy
+        # Migrations run before the new code so the old version, which is still
+        # serving, keeps working against the new schema. That means every
+        # migration must be backward compatible — see docs/deployment.
+        run: ./scripts/deploy.sh staging "${{ needs.build-images.outputs.tag }}"
+        env:
+          DEPLOY_HOST: ${{ secrets.STAGING_HOST }}
+          DEPLOY_KEY: ${{ secrets.STAGING_SSH_KEY }}
+
+      - name: Wait for health
+        run: ./scripts/wait-for-health.sh "${{ vars.STAGING_API_URL }}"
+
+      - name: Smoke tests
+        run: ./scripts/smoke-test.sh "${{ vars.STAGING_API_URL }}"
+
+  # ---------------------------------------------------------------------------
+  production:
+    name: Deploy to production
+    needs: [build-images, staging]
+    if: github.event.inputs.environment == 'production' || startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    # Requires a reviewer on the GitHub environment; the deploy waits for it.
+    environment: production
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Record the currently deployed tag
+        id: previous
+        run: ./scripts/current-tag.sh >> "$GITHUB_OUTPUT"
+        env:
+          DEPLOY_HOST: ${{ secrets.PRODUCTION_HOST }}
+          DEPLOY_KEY: ${{ secrets.PRODUCTION_SSH_KEY }}
+
+      - name: Back up the database
+        run: ./scripts/backup-before-deploy.sh
+        env:
+          DEPLOY_HOST: ${{ secrets.PRODUCTION_HOST }}
+          DEPLOY_KEY: ${{ secrets.PRODUCTION_SSH_KEY }}
+
+      - name: Deploy
+        run: ./scripts/deploy.sh production "${{ needs.build-images.outputs.tag }}"
+        env:
+          DEPLOY_HOST: ${{ secrets.PRODUCTION_HOST }}
+          DEPLOY_KEY: ${{ secrets.PRODUCTION_SSH_KEY }}
+
+      - name: Wait for health
+        run: ./scripts/wait-for-health.sh "${{ vars.PRODUCTION_API_URL }}"
+
+      - name: Smoke tests
+        id: smoke
+        run: ./scripts/smoke-test.sh "${{ vars.PRODUCTION_API_URL }}"
+
+      - name: Roll back on failure
+        if: failure() && steps.previous.outputs.tag != ''
+        # Code rolls back; the schema does not. Migrations are written to be
+        # backward compatible precisely so this is safe.
+        run: ./scripts/deploy.sh production "${{ steps.previous.outputs.tag }}" --skip-migrations
+        env:
+          DEPLOY_HOST: ${{ secrets.PRODUCTION_HOST }}
+          DEPLOY_KEY: ${{ secrets.PRODUCTION_SSH_KEY }}

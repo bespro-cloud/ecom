@@ -1,0 +1,185 @@
+# Compliance
+
+## Read this first
+
+**Software does not make a business compliant.** This platform provides
+technical controls that make compliance _possible to demonstrate_ — recorded
+approvals, immutable history, traceable stock. It cannot tell you whether your
+product is correctly classified, whether your label is lawful, or whether a
+particular claim is permissible.
+
+Before selling anything, obtain US legal and regulatory review covering:
+
+- Product classification (dietary supplement, cosmetic, food, device, general
+  wellness — the obligations differ substantially)
+- Labelling, including Supplement Facts and allergen declarations
+- Every marketing claim, in every channel
+- Manufacturing arrangements and supplier qualification
+- Privacy and state consumer-protection law
+- Sales tax nexus and registration
+- Shipping restrictions
+
+Nothing in this repository asserts that any product is FDA approved, and the
+system will not let you assert it without a recorded review.
+
+## The regulatory landscape this is built for
+
+At a high level, and not as legal advice:
+
+**Dietary supplements** are regulated under DSHEA. They are not pre-approved by
+the FDA. A _structure/function_ claim ("supports normal immune function") is
+generally permissible with substantiation and the standard disclaimer. A
+_disease_ claim ("treats influenza") makes the product an unapproved drug.
+
+**Cosmetics** may make appearance claims but not claims of altering structure or
+function.
+
+**General wellness devices** have their own FDA guidance and a narrower set of
+permissible claims.
+
+The distinction between a permissible structure/function claim and an
+impermissible disease claim is a legal judgement about specific wording. The
+platform's job is to ensure a human with the authority to make that judgement
+made it, on the record, before the wording went public.
+
+## What the platform enforces
+
+### Separation of duty (built, Phase 1)
+
+`COMPLIANCE_REVIEWER` is the only role holding `CLAIM_APPROVE`,
+`EVIDENCE_APPROVE` and `COMPLIANCE_APPROVE`. `ADMIN` deliberately does not.
+Someone administering the store cannot approve a medical claim, and the audit
+trail always shows who did.
+
+The role requires MFA, and the requirement cannot be turned off by its holder.
+
+### Append-only history (built, Phase 1)
+
+`audit_logs` and `customer_consents` reject UPDATE and DELETE at the database
+level, not merely in the application. A bug, an ORM `updateMany`, or a
+compromised service account cannot rewrite the record of who approved what.
+
+This matters because the value of a compliance record is entirely in its
+credibility. A record that _could_ have been edited is not evidence.
+
+### Consent as a ledger (built, Phase 1)
+
+Marketing consent is not a boolean that gets overwritten. Every grant and every
+withdrawal is a new row carrying the timestamp, source, truncated IP and user
+agent. Answering "did this person consent, when, and to what?" is a query, not
+an argument.
+
+### Recorded reasons (built, Phase 1)
+
+Changing a role assignment or a system setting requires a written reason, stored
+with the before and after state. "Why does this account have this access?" has an
+answer.
+
+### Publishing gate (Phase 2 + 4)
+
+A product cannot become publicly visible until a configurable checklist passes:
+
+- Product information complete
+- Label available
+- Ingredients complete
+- Required warnings present
+- Claims reviewed and approved
+- Evidence reviewed
+- Compliance review signed off
+- Images available
+- Price configured
+- Inventory configuration valid
+- SEO metadata complete
+
+The gate is a hard block, not a warning.
+
+### Claim lifecycle (Phase 4)
+
+```
+DRAFT → EVIDENCE_REQUIRED → UNDER_REVIEW → APPROVED
+                                        ↘ REJECTED
+                            APPROVED → EXPIRED (review interval elapsed)
+```
+
+An approved claim is never overwritten. Editing one creates a new version
+retaining the previous text, the new text, who changed it, when, why, the
+evidence, and the approval history. Approvals expire on a configurable interval
+(`compliance.claims_review_interval_days`) so a claim approved years ago against
+since-superseded evidence does not stay live by default.
+
+### Evidence (Phase 4)
+
+Each record captures source type (RCT, systematic review, meta-analysis,
+observational, lab, manufacturer data, regulatory, other), citation, study type,
+population, dosage, duration, outcome, **limitations**, relevance, and who
+reviewed it.
+
+Limitations are a required field. Evidence without stated limitations tends to
+be evidence being oversold.
+
+### Traceability and recall (Phase 4)
+
+Stock is tracked by batch and lot with manufacture and expiry dates. Allocation
+is first-expiry-first-out and excludes expired, quarantined and recalled stock.
+
+When a lot is recalled the system stops allocation, quarantines remaining stock,
+and derives affected products → orders → customers. It does **not** contact
+anyone automatically: customer notification during a recall is a decision with
+legal consequences, and it requires explicit approval.
+
+## What AI may and may not do (Phase 7)
+
+May: summarise approved evidence, draft content for human review, answer
+questions from approved knowledge, analyse sales.
+
+May not: approve a claim, change compliance status, invent evidence or
+certifications, assert FDA approval, diagnose, prescribe, alter dosage, issue
+refunds, adjust inventory, or bypass RBAC.
+
+For anything sensitive, AI creates a task for a human. It never completes the
+action.
+
+When the system lacks sufficient approved information to answer a health-related
+question, it must say so. A plausible-sounding fabrication about a supplement is
+worse than no answer.
+
+## Data protection
+
+- Collect only what the business needs.
+- Do not collect health information unless there is a specific, legally reviewed
+  reason. There is no health-profile model in this schema, and that is
+  deliberate.
+- Customer health information must never reach analytics, logs, AI prompts,
+  URLs, browser storage or error messages.
+- Consent history is retained as evidence and is not deleted by the application.
+
+## Records to retain
+
+| Record                       | Retained     | Why                           |
+| ---------------------------- | ------------ | ----------------------------- |
+| Claim approvals and versions | Indefinitely | Substantiation history        |
+| Evidence and reviews         | Indefinitely | Substantiation history        |
+| Batch and lot records        | Per policy   | Traceability, recall scope    |
+| Recall actions               | Indefinitely | Regulatory record             |
+| Audit log                    | Per policy   | Who did what, when            |
+| Consent ledger               | Per policy   | Proof of permission           |
+| Order and payment records    | Per tax law  | Financial and tax obligations |
+
+"Per policy" means: decided with counsel, then implemented as a privileged
+out-of-band job. The application itself cannot delete these — see
+[../operations/RETENTION.md](../operations/RETENTION.md).
+
+## Before launch
+
+- [ ] Regulatory counsel has reviewed product classification
+- [ ] Every claim reviewed and approved through the platform
+- [ ] Labels reviewed
+- [ ] Supplier and manufacturer qualification documented
+- [ ] Adverse-event reporting process defined and staffed
+- [ ] Recall procedure documented and rehearsed
+- [ ] Privacy policy and terms reviewed by counsel
+- [ ] Sales tax nexus assessed and registrations filed
+- [ ] Shipping restrictions confirmed per product and destination
+- [ ] Insurance in place
+- [ ] Retention periods set with counsel and implemented
+- [ ] Staff trained on what they may and may not say about a product

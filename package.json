@@ -1,0 +1,53 @@
+{
+  "name": "health-commerce",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@10.33.0",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev --parallel",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "test:unit": "turbo run test:unit",
+    "test:integration": "turbo run test:integration",
+    "test:e2e": "turbo run test:e2e",
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md,yml,yaml}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md,yml,yaml}\"",
+    "db:generate": "pnpm --filter @health/database run generate",
+    "db:migrate": "pnpm --filter @health/database run migrate",
+    "db:migrate:deploy": "pnpm --filter @health/database run migrate:deploy",
+    "db:seed": "pnpm --filter @health/database run seed",
+    "db:reset": "pnpm --filter @health/database run reset",
+    "db:studio": "pnpm --filter @health/database run studio"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.18.0",
+    "@prisma/client": "6.2.1",
+    "@types/node": "22.10.7",
+    "eslint": "9.18.0",
+    "eslint-config-prettier": "10.0.1",
+    "prettier": "3.4.2",
+    "prisma": "6.2.1",
+    "turbo": "2.3.3",
+    "typescript": "5.7.3",
+    "typescript-eslint": "8.21.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "@prisma/client",
+      "@prisma/engines",
+      "prisma",
+      "@node-rs/argon2",
+      "sharp",
+      "unrs-resolver",
+      "@sentry/cli",
+      "@swc/core",
+      "core-js"
+    ]
+  }
+}
