@@ -75,23 +75,59 @@ Changing a role assignment or a system setting requires a written reason, stored
 with the before and after state. "Why does this account have this access?" has an
 answer.
 
-### Publishing gate (Phase 2 + 4)
+### Publishing gate (built, Phase 2 — two checks await Phase 3/4)
 
-A product cannot become publicly visible until a configurable checklist passes:
+A product cannot become publicly visible until a checklist passes. The gate is a
+hard block, not a warning, and it is evaluated server-side at the moment of the
+transition — not when the admin screen was rendered, so a stale screen cannot
+publish a listing that has since lost its approval.
 
-- Product information complete
-- Label available
-- Ingredients complete
-- Required warnings present
-- Claims reviewed and approved
-- Evidence reviewed
-- Compliance review signed off
-- Images available
-- Price configured
-- Inventory configuration valid
-- SEO metadata complete
+| Check                | Evaluated | Notes                                                 |
+| -------------------- | --------- | ----------------------------------------------------- |
+| Product information  | Phase 2   | Name, descriptions, brand, manufacturer, origin       |
+| Price configured     | Phase 2   | Non-zero, and a compare-at price that is real         |
+| Images available     | Phase 2   | A hero image, and alternative text on every one       |
+| Label available      | Phase 2   | Label photograph, and a facts panel where required    |
+| Ingredients complete | Phase 2   | An amount, or an explicit note explaining its absence |
+| Allergen disclosure  | Phase 2   | See below                                             |
+| Required disclaimers | Phase 2   | DSHEA on supplements; general health on everything    |
+| SEO metadata         | Phase 2   | Present and within displayed lengths                  |
+| Categorised          | Phase 2   | At least one, with a primary for the canonical URL    |
+| Compliance approved  | Phase 2   | Signed off, and not expired                           |
+| Claims reviewed      | Phase 4   | Reported `NOT_YET_ENFORCED` until then                |
+| Evidence reviewed    | Phase 4   | Reported `NOT_YET_ENFORCED` until then                |
+| Inventory configured | Phase 3   | Reported `NOT_YET_ENFORCED` until then                |
 
-The gate is a hard block, not a warning.
+**Nothing passes by omission.** A check whose domain does not exist yet reports
+`NOT_YET_ENFORCED` and is listed explicitly, on the API and on the admin screen.
+It does not block — nobody could satisfy it — but it is never counted as a pass.
+A checklist that quietly approves is worse than no checklist, because it looks
+like assurance.
+
+**Which checks are required is configuration**, held in
+`catalog.publish_checklist`. What a business must verify before publishing is a
+legal question, and an operator can tighten it without a deploy. Removing a key
+stops a finding from blocking publication; it does not stop the finding being
+evaluated or reported.
+
+**Allergen disclosure.** Under FALCPA, extended by the FASTER Act to include
+sesame, a major allergen must be declared. If any ingredient on a listing is
+flagged as an allergen, the listing must carry an allergen disclaimer or a
+warning that names it. The system will not write that text: naming an allergen
+is a labelling statement, and a generated one is exactly the kind of plausible
+fabrication that must never reach a customer.
+
+**Approvals lapse.** An approval is valid for
+`compliance.claims_review_interval_days`, after which the check fails again. An
+approval granted against evidence that has since been superseded is not an
+approval.
+
+**Material changes re-open the approval** and take a live listing down with it:
+the formulation, the manufacturer, the country of origin, the product type, the
+name, the warnings, the disclaimers, the label or facts-panel photograph, or a
+new warning on any ingredient the product contains. The last is deliberately
+blunt — deciding which changes to safety information are minor enough to skip is
+not a judgement this system is entitled to make.
 
 ### Claim lifecycle (Phase 4)
 

@@ -1,5 +1,11 @@
 import { clsx } from 'clsx';
-import { useId, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes } from 'react';
+import {
+  useId,
+  type InputHTMLAttributes,
+  type ReactNode,
+  type SelectHTMLAttributes,
+  type TextareaHTMLAttributes,
+} from 'react';
 
 export interface FieldProps extends Omit<InputHTMLAttributes<HTMLInputElement>, 'id'> {
   label: string;
@@ -39,6 +45,72 @@ export function Field({ label, error, hint, className, required, ...rest }: Fiel
         </p>
       ) : null}
       <input
+        id={id}
+        required={required}
+        aria-invalid={error ? true : undefined}
+        aria-describedby={describedBy || undefined}
+        className={clsx(
+          'block w-full rounded-lg border-0 px-3 py-2.5 text-slate-900 shadow-sm ring-1 ring-inset',
+          'placeholder:text-slate-400 focus:ring-2 focus:ring-inset sm:text-sm',
+          error ? 'ring-red-500 focus:ring-red-600' : 'ring-slate-300 focus:ring-brand-600',
+          className,
+        )}
+        {...rest}
+      />
+      {error ? (
+        <p id={errorId} role="alert" className="text-sm font-medium text-red-700">
+          {error}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+export interface TextareaFieldProps
+  extends Omit<TextareaHTMLAttributes<HTMLTextAreaElement>, 'id'> {
+  label: string;
+  error?: string;
+  hint?: string;
+}
+
+/**
+ * A labelled multi-line input.
+ *
+ * Same wiring as `Field` — a real `<label>`, hints and errors through
+ * `aria-describedby`, `role="alert"` on the error so it is announced when it
+ * appears. Kept as its own component rather than a polymorphic prop on `Field`
+ * so the element's own attributes (`rows`, `maxLength`) stay properly typed.
+ */
+export function TextareaField({
+  label,
+  error,
+  hint,
+  className,
+  required,
+  ...rest
+}: TextareaFieldProps) {
+  const id = useId();
+  const hintId = `${id}-hint`;
+  const errorId = `${id}-error`;
+  const describedBy = [hint ? hintId : null, error ? errorId : null].filter(Boolean).join(' ');
+
+  return (
+    <div className="space-y-1.5">
+      <label htmlFor={id} className="block text-sm font-medium text-slate-900">
+        {label}
+        {required ? (
+          <span className="ml-1 text-red-600" aria-hidden="true">
+            *
+          </span>
+        ) : null}
+        {required ? <span className="sr-only"> (required)</span> : null}
+      </label>
+      {hint ? (
+        <p id={hintId} className="text-sm text-slate-500">
+          {hint}
+        </p>
+      ) : null}
+      <textarea
         id={id}
         required={required}
         aria-invalid={error ? true : undefined}

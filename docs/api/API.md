@@ -188,6 +188,141 @@ API, whatever permissions the caller holds.
 A setting's declared type is fixed; changing it is refused. Every change needs a
 `reason` and is audited with the before and after value.
 
+## Catalogue · public
+
+Every route here is public: a customer browsing does not have an account. The
+scoping is structural rather than permission-based — these read only published,
+non-deleted products, and no parameter can widen that.
+
+| Endpoint                           | Purpose                                      |
+| ---------------------------------- | -------------------------------------------- |
+| `GET /catalogue/products`          | Browse and search, with facet counts         |
+| `GET /catalogue/products/:slug`    | One published product, in full               |
+| `GET /catalogue/categories`        | The active category tree                     |
+| `GET /catalogue/ingredients/:slug` | One ingredient, with sourcing and warnings   |
+| `GET /catalogue/sitemap`           | Indexable URLs, excluding anything `noindex` |
+
+`GET /catalogue/products` accepts `q`, `category`, `type`, `brand`,
+`minPriceCents`, `maxPriceCents`, repeatable `attr=key:value`, `sort` and
+`cursor`. Search is full-text with a trigram fallback, so a misspelling still
+finds the product; when a query returns nothing, `meta.suggestion` carries a
+spelling suggestion — and only then, so it never second-guesses a query that
+worked.
+
+Results are ranked, so `cursor` encodes an offset rather than a row key: a
+relevance score is not something you can resume from.
+
+## Catalogue administration
+
+Under `/admin/catalogue`. The permission split is deliberate: `PRODUCT_WRITE`
+edits a draft, `PRODUCT_PUBLISH` moves a listing between statuses. Someone can
+be trusted to write product copy without being trusted to put it in front of
+customers.
+
+| Endpoint                                                                 | Permission                   |
+| ------------------------------------------------------------------------ | ---------------------------- |
+| `GET/POST /products`, `PATCH /products/:id`                              | `PRODUCT_READ/WRITE`         |
+| `GET /products/:id/readiness`                                            | `PRODUCT_READ`               |
+| `PUT /products/:id/status`                                               | `PRODUCT_PUBLISH`            |
+| `PUT /products/:id/{ingredients,categories,images,warnings,disclaimers}` | `PRODUCT_WRITE`              |
+| `DELETE /products/:id`                                                   | `PRODUCT_WRITE`              |
+| `.../categories`, `.../ingredients`                                      | `CATEGORY_*`, `INGREDIENT_*` |
+
+A product is always created as a draft; there is no field on `POST /products`
+that produces a publicly visible listing.
+
+### The publishing gate
+
+`PUT /products/:id/status` is the only way a listing becomes visible, and it
+evaluates the checklist at the transition — against current data, not against
+what the admin screen was showing. A refusal is `422 PRECONDITION_FAILED` with
+one `details` entry per failing check, keyed by the check name.
+
+The same gate guards the move into `READY`, minus the compliance signature, so
+that status is a claim the data supports.
+
+`GET /products/:id/readiness` returns the same evaluation without attempting a
+transition:
+
+```json
+{
+  "ready": false,
+  "blockedBy": ["IMAGES", "COMPLIANCE_APPROVED"],
+  "notYetEnforced": ["CLAIMS_REVIEWED", "EVIDENCE_REVIEWED", "INVENTORY_CONFIGURED"],
+  "checks": [
+    { "key": "IMAGES", "state": "FAIL", "detail": "No hero image.", "implementedInPhase": 2 },
+    { "key": "CLAIMS_REVIEWED", "state": "NOT_YET_ENFORCED", "detail": "Evaluated from Phase 4." }
+  ]
+}
+```
+
+`NOT_YET_ENFORCED` means the domain that would evaluate the check does not
+exist in this build. It is reported rather than counted as a pass, and it does
+not block, because nobody could satisfy it. Which checks are _required_ is
+configuration (`catalog.publish_checklist`); removing a key stops a finding
+blocking publication, it does not stop the finding being reported.
+
+Taking a live listing out of sale requires a `reason`, which is recorded.
+
+## Compliance
+
+| Endpoint                                 | Permission                 |
+| ---------------------------------------- | -------------------------- |
+| `GET /compliance/products/:id`           | `COMPLIANCE_READ`          |
+| `GET /compliance/products/:id/history`   | `COMPLIANCE_READ`          |
+| `POST /compliance/products/:id/decision` | `COMPLIANCE_APPROVE` + MFA |
+| `GET /compliance/expiring`               | `COMPLIANCE_READ`          |
+
+`ADMIN` deliberately does not hold `COMPLIANCE_APPROVE`. Administering the store
+and signing off a health product listing are separate authorities.
+
+A decision carries `notes` with a real minimum length — a decision without
+reasoning is not a review. The record is append-only at the database level and
+snapshots the checklist the reviewer saw. Approving is not publishing: it
+satisfies one check, and the gate re-evaluates everything at the transition.
+
+Approvals expire after `compliance.claims_review_interval_days`. A rejection
+takes a live listing down immediately.
+
+## Media
+
+| Endpoint             | Permission      |
+| -------------------- | --------------- |
+| `POST /media/images` | `PRODUCT_WRITE` |
+| `GET /media`         | `PRODUCT_READ`  |
+| `GET /media/:id`     | `PRODUCT_READ`  |
+| `DELETE /media/:id`  | `PRODUCT_WRITE` |
+
+Uploads are `multipart/form-data`. The file is decoded before it is trusted —
+the filename and the declared content type are both caller-supplied and neither
+is evidence of anything — then re-encoded to strip EXIF (including GPS) and
+stored under a key derived from its SHA-256, so the same bytes uploaded twice
+are one object. SVG is rejected: it is a document format that can carry script.
+
+Deletion is soft. The stored object stays, because keys are content-addressed
+and another record may reference the same bytes.
+
+## Content and SEO
+
+| Endpoint                                  | Permission           |
+| ----------------------------------------- | -------------------- |
+| `GET /content/pages/:slug` · public       | —                    |
+| `GET /content/sitemap` · public           | —                    |
+| `GET/POST /content/admin/pages`           | `CONTENT_READ/WRITE` |
+| `PATCH /content/admin/pages/:id`          | `CONTENT_WRITE`      |
+| `POST /content/admin/pages/:id/publish`   | `CONTENT_PUBLISH`    |
+| `POST /content/admin/pages/:id/unpublish` | `CONTENT_PUBLISH`    |
+| `GET/PUT /content/admin/seo/:type/:id`    | `SEO_READ/WRITE`     |
+
+Page content is an array of typed blocks, never HTML. An editor that accepted
+HTML would eventually store a script tag, and rendering it would be stored XSS;
+blocks cannot express script at all.
+
+`PATCH` on a published page writes to the draft columns only. The live page does
+not change until someone publishes, so saving a half-finished edit to the
+shipping policy does not change the shipping policy. The public read endpoint
+has no parameter that could return draft content.
+
 ## Audit
 
 `GET /audit-logs` · `AUDIT_READ`

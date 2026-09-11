@@ -7,6 +7,7 @@ module.exports = {
     '^.+\\.ts$': ['ts-jest', { tsconfig: '<rootDir>/tsconfig.test.json', isolatedModules: true }],
   },
   moduleNameMapper: { '^(\\.{1,2}/.*)\\.js$': '$1' },
+  setupFilesAfterEnv: ['<rootDir>/test/setup.ts'],
   testTimeout: 60000,
   maxWorkers: 1,
   forceExit: true,

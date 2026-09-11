@@ -17,6 +17,12 @@ interface NavItem {
 
 const NAV: NavItem[] = [
   { href: '/', label: 'Overview' },
+  { href: '/catalogue', label: 'Catalogue', permission: 'PRODUCT_READ' },
+  { href: '/catalogue/categories', label: 'Categories', permission: 'CATEGORY_READ' },
+  { href: '/catalogue/ingredients', label: 'Ingredients', permission: 'INGREDIENT_READ' },
+  { href: '/catalogue/media', label: 'Media', permission: 'PRODUCT_READ' },
+  { href: '/content', label: 'Pages', permission: 'CONTENT_READ' },
+  { href: '/compliance', label: 'Compliance', permission: 'COMPLIANCE_READ' },
   { href: '/users', label: 'Staff & customers', permission: 'USER_READ' },
   { href: '/roles', label: 'Roles & permissions', permission: 'ROLE_READ' },
   { href: '/audit', label: 'Audit log', permission: 'AUDIT_READ' },

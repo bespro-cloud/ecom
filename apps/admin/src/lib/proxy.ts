@@ -49,7 +49,11 @@ export async function proxyToApi(request: NextRequest, path: string[]): Promise<
     upstream = await fetch(target, {
       method: request.method,
       headers: outgoing,
-      ...(hasBody ? { body: await request.text() } : {}),
+      // `arrayBuffer`, never `text`. Reading a body as UTF-8 replaces every
+      // invalid byte sequence with U+FFFD, which silently destroys any binary
+      // payload — a multipart image upload arrives as a corrupt file rather
+      // than an error.
+      ...(hasBody ? { body: await request.arrayBuffer() } : {}),
       redirect: 'manual',
       cache: 'no-store',
     });

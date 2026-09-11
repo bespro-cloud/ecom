@@ -10,6 +10,25 @@ import { createPrismaClient, type PrismaClient } from './client.js';
 
 /** Tables truncated between tests, ordered so FK cascades are irrelevant. */
 const TRUNCATABLE_TABLES = [
+  // Catalogue first: rows below are referenced by these.
+  'compliance_reviews',
+  'product_disclaimers',
+  'product_warnings',
+  'product_ingredients',
+  'product_attribute_values',
+  'product_categories',
+  'product_images',
+  'product_variants',
+  'products',
+  'categories',
+  'product_attributes',
+  'ingredient_warnings',
+  'ingredient_sources',
+  'ingredients',
+  'seo_metadata',
+  'pages',
+  'media',
+
   'audit_logs',
   'customer_consents',
   'customer_addresses',
@@ -23,6 +42,9 @@ const TRUNCATABLE_TABLES = [
   'outbox_messages',
   'webhook_events',
 ] as const;
+
+/** Tables a database trigger makes append-only. */
+const APPEND_ONLY_TABLES = ['audit_logs', 'customer_consents', 'compliance_reviews'] as const;
 
 export function requireTestDatabaseUrl(): string {
   const url = process.env.DATABASE_URL;
@@ -52,14 +74,16 @@ export async function truncateAll(prisma: PrismaClient): Promise<void> {
   requireTestDatabaseUrl();
   // ALTER TABLE ... DISABLE TRIGGER is needed because the append-only triggers
   // would otherwise refuse the DELETE.
-  await prisma.$executeRawUnsafe('ALTER TABLE "audit_logs" DISABLE TRIGGER USER');
-  await prisma.$executeRawUnsafe('ALTER TABLE "customer_consents" DISABLE TRIGGER USER');
+  for (const table of APPEND_ONLY_TABLES) {
+    await prisma.$executeRawUnsafe(`ALTER TABLE "${table}" DISABLE TRIGGER USER`);
+  }
   try {
     await prisma.$executeRawUnsafe(
       `TRUNCATE TABLE ${TRUNCATABLE_TABLES.map((t) => `"${t}"`).join(', ')} RESTART IDENTITY CASCADE`,
     );
   } finally {
-    await prisma.$executeRawUnsafe('ALTER TABLE "audit_logs" ENABLE TRIGGER USER');
-    await prisma.$executeRawUnsafe('ALTER TABLE "customer_consents" ENABLE TRIGGER USER');
+    for (const table of APPEND_ONLY_TABLES) {
+      await prisma.$executeRawUnsafe(`ALTER TABLE "${table}" ENABLE TRIGGER USER`);
+    }
   }
 }

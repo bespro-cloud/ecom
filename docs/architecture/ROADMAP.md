@@ -52,24 +52,78 @@ scaffolding everything else sits on.
 
 ---
 
-## Phase 2 — Catalogue and content 🔜 Next
+## Phase 2 — Catalogue and content ✅ Complete
 
-- Products, variants, images, attributes
-- Categories and the category tree
-- Ingredients, sources, warnings, allergens
-- Product search (PostgreSQL full-text behind a swappable interface)
-- Product detail and listing pages
-- Admin product management
-- CMS pages with draft/publish
-- SEO foundation: metadata, structured data, sitemap, canonical URLs
-- S3 media pipeline with image optimisation
+The catalogue, the content system, and the gate that decides what customers are
+allowed to see.
 
-**Gate:** a product cannot be published without passing the compliance checklist
-(Phase 4 supplies the checklist; Phase 2 builds the gate that consults it).
+**Delivered**
+
+- Products, variants, images, attributes; categories with a materialised path
+- Ingredients as shared records, with sources, warnings and allergen flags — so
+  "which products contain this?" is answerable
+- PostgreSQL full-text search behind a swappable provider interface: a stored
+  generated `tsvector` with weighted fields, a GIN index, and trigram word
+  similarity for typo tolerance
+- Storefront listing with facets, sorting and paging; product pages with the
+  full ingredient record, inherited warnings and allergen declarations;
+  category and ingredient reference pages
+- Admin catalogue: product list and editor, publishing checklist, categories,
+  ingredients, media library, CMS editor, compliance review screen
+- CMS pages as typed blocks with draft/publish separation
+- SEO: per-entity metadata, structured data, canonical URLs, a database-driven
+  sitemap that honours `noindex`
+- Content-addressed object storage with a real S3 adapter and an isolated
+  development filesystem adapter that production configuration refuses;
+  uploads are decoded before they are trusted and stripped of EXIF
+
+**The gate**
+
+A product cannot be published without passing the publishing checklist. Thirteen
+checks are declared; ten are evaluated now and three belong to later phases.
+Those three report `NOT_YET_ENFORCED` and are listed explicitly — a checklist
+that quietly counts unbuilt checks as passes looks like assurance it cannot
+give. The gate is evaluated server-side at the transition, so a stale admin
+screen cannot publish something that has since lost its approval, and it also
+guards the move into `READY` (minus the compliance signature), so that status
+means what it says.
+
+Compliance approval is a separate authority: `ADMIN` deliberately lacks
+`COMPLIANCE_APPROVE`. Decisions are append-only at the database level, snapshot
+the checklist the reviewer saw, and lapse on a configured interval. Material
+changes — the formulation, the manufacturer, the warnings, the label
+photograph, or a new warning on any ingredient used — re-open the approval and
+withdraw a live listing.
+
+**Verified**
+
+| Suite                     | Count | Against                  |
+| ------------------------- | ----: | ------------------------ |
+| Shared package unit tests |   194 | pure logic               |
+| Storefront unit tests     |    45 | pure logic               |
+| API unit tests            |    61 | pure logic               |
+| Database integration      |    17 | real PostgreSQL          |
+| API integration (e2e)     |   124 | real PostgreSQL + Redis  |
+| Worker integration        |     9 | real PostgreSQL + BullMQ |
+
+Both front ends were additionally exercised against the running API with a real
+published product: the storefront listing, search, facets, product page,
+structured data and sitemap; the admin catalogue, compliance queue and review
+screen, signed in as a product manager and as an MFA-verified compliance
+reviewer.
+
+**Not done in Phase 2**
+
+- Automated browser E2E (Playwright). Still verified against running services by
+  hand; the harness has slipped again and should not slip a third time.
+- Load testing. No performance claim is made anywhere.
+- Product variants have a schema and an admin read view, but no editor. Nothing
+  in Phase 2 needs one; Phase 3 does, because stock is held per variant.
+- Claims and evidence. Phase 4. The gate already declares the two checks.
 
 ---
 
-## Phase 3 — Commerce
+## Phase 3 — Commerce 🔜 Next
 
 - Cart (guest and authenticated, with merge on sign-in)
 - Server-side pricing — client totals are never trusted
