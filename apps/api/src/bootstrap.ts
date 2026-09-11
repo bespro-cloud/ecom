@@ -5,6 +5,7 @@ import { Logger } from 'nestjs-pino';
 import helmet from 'helmet';
 import compression from 'compression';
 import cookieParser from 'cookie-parser';
+import express from 'express';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module.js';
 import { AppConfigService } from './infrastructure/config/app-config.service.js';
@@ -49,6 +50,27 @@ export async function createApp(): Promise<NestExpressApplication> {
   );
   app.use(compression());
   app.use(cookieParser());
+
+  /**
+   * Keep the exact bytes of a payment webhook.
+   *
+   * Provider signatures are computed over the raw body. Parsing JSON and
+   * re-serialising it changes whitespace and key order, and the signature with
+   * it, so the one route that verifies signatures needs the original buffer.
+   *
+   * Scoped to that path rather than applied globally: retaining a copy of every
+   * request body would be a needless memory cost, and on a healthcare platform
+   * an extra copy of customer data in process memory is not free either.
+   */
+  app.use(
+    '/api/v1/webhooks',
+    express.json({
+      limit: '1mb',
+      verify: (request, _response, buffer) => {
+        (request as express.Request & { rawBody?: Buffer }).rawBody = Buffer.from(buffer);
+      },
+    }),
+  );
 
   app.enableCors({
     origin: config.corsOrigins,

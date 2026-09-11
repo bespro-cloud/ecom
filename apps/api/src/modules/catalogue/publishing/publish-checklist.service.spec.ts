@@ -2,6 +2,7 @@ import { PUBLISH_CHECK_DEFINITIONS, type PublishCheckKey } from '@health/types';
 import { PublishChecklistService } from './publish-checklist.service.js';
 import type { PrismaService } from '../../../infrastructure/prisma/prisma.service.js';
 import type { SettingsService } from '../../settings/settings.service.js';
+import type { WarehousesService } from '../../commerce/inventory/warehouses.service.js';
 
 /**
  * The publishing gate, exercised without a database.
@@ -67,7 +68,9 @@ function build(
   product: ProductRow | null,
   options: {
     seo?: { title: string | null; description: string | null } | null;
-    required?: PublishCheckKey[] | null;
+    relaxed?: PublishCheckKey[] | null;
+    /** What the warehouse lookup should report for this product. */
+    stocked?: boolean;
   } = {},
 ): Harness {
   let seo =
@@ -85,14 +88,24 @@ function build(
 
   const settings = {
     get: jest.fn(async (key: string) =>
-      key === 'catalog.publish_checklist' ? (options.required ?? null) : null,
+      key === 'catalog.publish_checklist_relaxed' ? (options.relaxed ?? null) : null,
     ),
   } as unknown as SettingsService;
+
+  // Stock configuration is a database question, so it is stubbed here and
+  // covered against real rows in the integration suite.
+  const warehouses = {
+    isConfiguredForSale: jest.fn(async () =>
+      options.stocked === false
+        ? { ok: false, missing: ['HC-1-V1'], variantCount: 1 }
+        : { ok: true, missing: [], variantCount: 1 },
+    ),
+  } as unknown as WarehousesService;
 
   const clock = { now: () => NOW, timestamp: () => NOW.getTime() };
 
   return {
-    service: new PublishChecklistService(prisma, settings, clock),
+    service: new PublishChecklistService(prisma, settings, warehouses, clock),
     setSeo: (next) => {
       seo = next;
     },
@@ -132,11 +145,9 @@ describe('PublishChecklistService', () => {
 
     // Claims and evidence arrive in Phase 4, inventory in Phase 3. Counting
     // them as passes would make the checklist look like assurance it is not.
-    expect(readiness.notYetEnforced.sort()).toEqual([
-      'CLAIMS_REVIEWED',
-      'EVIDENCE_REVIEWED',
-      'INVENTORY_CONFIGURED',
-    ]);
+    // Inventory moved from declared to enforced in Phase 3; claims and
+    // evidence arrive in Phase 4.
+    expect(readiness.notYetEnforced.sort()).toEqual(['CLAIMS_REVIEWED', 'EVIDENCE_REVIEWED']);
     for (const key of readiness.notYetEnforced) {
       expect(stateOf(readiness.checks, key)).toBe('NOT_YET_ENFORCED');
     }
@@ -443,12 +454,33 @@ describe('PublishChecklistService', () => {
     });
   });
 
-  describe('the configured required set', () => {
-    it('still reports a finding an operator has not marked required', async () => {
+  describe('inventory', () => {
+    it('blocks a product the warehouse could not allocate', async () => {
+      // Publishing something that cannot be allocated produces orders nobody
+      // can fulfil.
+      const { service } = build(compliantSupplement(), { stocked: false });
+      const readiness = await service.evaluate('product-1');
+
+      expect(readiness.blockedBy).toContain('INVENTORY_CONFIGURED');
+      expect(readiness.checks.find((c) => c.key === 'INVENTORY_CONFIGURED')?.detail).toMatch(
+        /stock record/i,
+      );
+    });
+
+    it('passes once every variant has a stock record', async () => {
+      const { service } = build(compliantSupplement(), { stocked: true });
+      expect(stateOf((await service.evaluate('product-1')).checks, 'INVENTORY_CONFIGURED')).toBe(
+        'PASS',
+      );
+    });
+  });
+
+  describe('relaxations', () => {
+    it('still reports a finding an operator has relaxed', async () => {
       // Downgrading it to NOT_APPLICABLE must not hide what was found —
-      // otherwise removing a key from the checklist erases the evidence.
+      // otherwise relaxing a check erases the evidence along with the block.
       const { service } = build(compliantSupplement({ compareAtPriceCents: 2499 }), {
-        required: ['COMPLIANCE_APPROVED'],
+        relaxed: ['PRICING'],
       });
       const readiness = await service.evaluate('product-1');
 
@@ -459,19 +491,21 @@ describe('PublishChecklistService', () => {
       expect(readiness.ready).toBe(true);
     });
 
-    it('cannot be used to publish without compliance approval when that check is required', async () => {
-      const { service } = build(compliantSupplement({ complianceStatus: 'REJECTED' }), {
-        required: ['COMPLIANCE_APPROVED'],
-      });
-      expect((await service.evaluate('product-1')).ready).toBe(false);
-    });
-
-    it('requires every implemented check when nothing is configured', async () => {
+    it('blocks on every check that has not been relaxed', async () => {
       const { service } = build(
         compliantSupplement({ priceCents: 0, complianceStatus: 'REJECTED' }),
-        {
-          required: null,
-        },
+        { relaxed: ['PRICING'] },
+      );
+      const readiness = await service.evaluate('product-1');
+
+      expect(readiness.blockedBy).not.toContain('PRICING');
+      expect(readiness.blockedBy).toContain('COMPLIANCE_APPROVED');
+    });
+
+    it('requires everything when nothing is relaxed', async () => {
+      const { service } = build(
+        compliantSupplement({ priceCents: 0, complianceStatus: 'REJECTED' }),
+        { relaxed: null },
       );
       const readiness = await service.evaluate('product-1');
 
@@ -480,10 +514,19 @@ describe('PublishChecklistService', () => {
       );
     });
 
-    it('falls back to every implemented check when the setting is an empty list', async () => {
-      // An empty list is far more likely to be a mistake than a decision to
-      // publish with no checks at all, and the safe reading is the strict one.
-      const { service } = build(compliantSupplement({ priceCents: 0 }), { required: [] });
+    it('requires everything for an empty relaxation list', async () => {
+      const { service } = build(compliantSupplement({ priceCents: 0 }), { relaxed: [] });
+      expect((await service.evaluate('product-1')).blockedBy).toContain('PRICING');
+    });
+
+    it('treats a check nobody has decided about as required', async () => {
+      // The property the inversion exists for: a check added to the codebase
+      // after an operator last saved their configuration must still block.
+      // Under an inclusion list its key would simply be absent, and absence
+      // would silently mean "not required".
+      const { service } = build(compliantSupplement({ priceCents: 0 }), {
+        relaxed: ['SEO'],
+      });
       expect((await service.evaluate('product-1')).blockedBy).toContain('PRICING');
     });
   });

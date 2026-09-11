@@ -21,6 +21,21 @@ export const CurrentUser = createParamDecorator(
   },
 );
 
+/**
+ * Injects the principal when there is one, and `undefined` when there is not.
+ *
+ * For `@Public()` routes that behave differently for a signed-in customer — a
+ * cart, a checkout — where being signed out is an ordinary case rather than an
+ * error. `@CurrentUser()` throws on purpose and must stay that way, so this is
+ * a separate decorator rather than an option on it: a handler that needs an
+ * identity should never be able to get `undefined` by accident.
+ */
+export const OptionalUser = createParamDecorator(
+  (_data: unknown, ctx: ExecutionContext): AuthenticatedPrincipal | undefined => {
+    return ctx.switchToHttp().getRequest<RequestWithPrincipal>().principal;
+  },
+);
+
 /** Request metadata used for audit records. */
 export interface RequestContext {
   ipAddress: string | null;

@@ -185,7 +185,10 @@ export const SYSTEM_ROLES: readonly SystemRoleDefinition[] = [
       'PRODUCT_READ',
       'ANALYTICS_READ',
     ),
-    requiresMfa: false,
+    // Holds REFUND_ISSUE, so this role can move money out of the
+    // business. That is the same bar that puts a second factor on
+    // COMPLIANCE_REVIEWER, and it applies here for the same reason.
+    requiresMfa: true,
   },
   {
     key: 'WAREHOUSE_MANAGER',

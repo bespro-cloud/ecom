@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { MediaModule } from '../media/media.module.js';
+import { CommerceModule } from '../commerce/commerce.module.js';
 import { ProductsService } from './products/products.service.js';
 import { CatalogueService } from './products/catalogue.service.js';
 import { CategoriesService } from './categories/categories.service.js';
@@ -18,7 +19,9 @@ import { AdminCatalogueController } from './admin-catalogue.controller.js';
  * line rather than to every call site.
  */
 @Module({
-  imports: [MediaModule],
+  // CommerceModule for the publishing checklist's inventory check: a product
+  // cannot be published unless the warehouse could actually fill an order.
+  imports: [MediaModule, CommerceModule],
   controllers: [CatalogueController, AdminCatalogueController],
   providers: [
     ProductsService,

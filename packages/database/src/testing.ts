@@ -10,7 +10,23 @@ import { createPrismaClient, type PrismaClient } from './client.js';
 
 /** Tables truncated between tests, ordered so FK cascades are irrelevant. */
 const TRUNCATABLE_TABLES = [
-  // Catalogue first: rows below are referenced by these.
+  // Commerce first: these reference the catalogue rows below them.
+  'shipment_items',
+  'shipments',
+  'refunds',
+  'payments',
+  'order_events',
+  'order_items',
+  'orders',
+  'checkouts',
+  'cart_items',
+  'carts',
+  'inventory_adjustments',
+  'inventory_reservations',
+  'inventory_items',
+  'warehouses',
+  'shipping_rates',
+
   'compliance_reviews',
   'product_disclaimers',
   'product_warnings',
@@ -44,7 +60,13 @@ const TRUNCATABLE_TABLES = [
 ] as const;
 
 /** Tables a database trigger makes append-only. */
-const APPEND_ONLY_TABLES = ['audit_logs', 'customer_consents', 'compliance_reviews'] as const;
+const APPEND_ONLY_TABLES = [
+  'audit_logs',
+  'customer_consents',
+  'compliance_reviews',
+  'order_events',
+  'inventory_adjustments',
+] as const;
 
 export function requireTestDatabaseUrl(): string {
   const url = process.env.DATABASE_URL;

@@ -86,9 +86,41 @@ export const CATALOGUE_AUDIT_ACTIONS = {
   COMPLIANCE_REVIEW_RECORDED: 'compliance.review.recorded',
 } as const;
 
+export const COMMERCE_AUDIT_ACTIONS = {
+  CART_MERGED: 'cart.merged',
+
+  CHECKOUT_STARTED: 'checkout.started',
+  CHECKOUT_CONFIRMED: 'checkout.confirmed',
+  CHECKOUT_REPRICED: 'checkout.repriced',
+
+  ORDER_PLACED: 'order.placed',
+  ORDER_STATUS_CHANGED: 'order.status.changed',
+  ORDER_CANCELLED: 'order.cancelled',
+  ORDER_NOTE_ADDED: 'order.note.added',
+
+  PAYMENT_INTENT_CREATED: 'payment.intent.created',
+  PAYMENT_CAPTURED: 'payment.captured',
+  PAYMENT_FAILED: 'payment.failed',
+  PAYMENT_WEBHOOK_REJECTED: 'payment.webhook.rejected',
+
+  REFUND_ISSUED: 'refund.issued',
+  REFUND_FAILED: 'refund.failed',
+
+  INVENTORY_ADJUSTED: 'inventory.adjusted',
+  WAREHOUSE_CREATED: 'warehouse.created',
+  WAREHOUSE_UPDATED: 'warehouse.updated',
+  INVENTORY_CONFIGURED: 'inventory.configured',
+
+  SHIPPING_RATE_CREATED: 'shipping.rate.created',
+  SHIPPING_RATE_UPDATED: 'shipping.rate.updated',
+  SHIPMENT_CREATED: 'shipment.created',
+  SHIPMENT_UPDATED: 'shipment.updated',
+} as const;
+
 export const ALL_AUDIT_ACTIONS = {
   ...AUDIT_ACTIONS,
   ...CATALOGUE_AUDIT_ACTIONS,
+  ...COMMERCE_AUDIT_ACTIONS,
 } as const;
 
 export type AuditAction = (typeof ALL_AUDIT_ACTIONS)[keyof typeof ALL_AUDIT_ACTIONS];
@@ -118,4 +150,11 @@ export const NOTABLE_AUDIT_ACTIONS: readonly AuditAction[] = [
   CATALOGUE_AUDIT_ACTIONS.PRODUCT_COMPLIANCE_INVALIDATED,
   CATALOGUE_AUDIT_ACTIONS.COMPLIANCE_REVIEW_RECORDED,
   CATALOGUE_AUDIT_ACTIONS.PAGE_PUBLISHED,
+  // Money and stock: the actions an operator most needs to see unprompted.
+  COMMERCE_AUDIT_ACTIONS.PAYMENT_FAILED,
+  COMMERCE_AUDIT_ACTIONS.PAYMENT_WEBHOOK_REJECTED,
+  COMMERCE_AUDIT_ACTIONS.REFUND_ISSUED,
+  COMMERCE_AUDIT_ACTIONS.REFUND_FAILED,
+  COMMERCE_AUDIT_ACTIONS.ORDER_CANCELLED,
+  COMMERCE_AUDIT_ACTIONS.INVENTORY_ADJUSTED,
 ];

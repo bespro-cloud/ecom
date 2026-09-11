@@ -105,6 +105,9 @@ importers:
       '@health/database':
         specifier: workspace:*
         version: link:../../packages/database
+      '@health/payments':
+        specifier: workspace:*
+        version: link:../../packages/payments
       '@health/storage':
         specifier: workspace:*
         version: link:../../packages/storage
@@ -452,6 +455,19 @@ importers:
         specifier: 2.1.8
         version: 2.1.8(@types/node@22.10.7)(terser@5.51.2)
 
+  packages/payments:
+    dependencies:
+      '@health/types':
+        specifier: workspace:*
+        version: link:../types
+    devDependencies:
+      typescript:
+        specifier: 5.7.3
+        version: 5.7.3
+      vitest:
+        specifier: 2.1.8
+        version: 2.1.8(@types/node@22.10.7)(terser@5.51.2)
+
   packages/storage:
     dependencies:
       '@aws-sdk/client-s3':
@@ -482,6 +498,9 @@ importers:
       typescript:
         specifier: 5.7.3
         version: 5.7.3
+      vitest:
+        specifier: 2.1.8
+        version: 2.1.8(@types/node@22.10.7)(terser@5.51.2)
 
   packages/ui:
     dependencies:

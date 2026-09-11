@@ -137,7 +137,8 @@ export const PUBLISH_CHECK_DEFINITIONS: readonly PublishCheckDefinition[] = [
   {
     key: 'INVENTORY_CONFIGURED',
     label: 'Inventory configuration valid',
-    description: 'A warehouse, a stock record and a batch-tracking policy exist for the product.',
+    description:
+      'Every sellable variant has a stock record in an active warehouse, so an order can actually be allocated.',
     implementedInPhase: 3,
   },
 ];

@@ -55,22 +55,22 @@ model User {
   status            UserStatus @default(ACTIVE)
 
   // Credential-stuffing / brute-force protection.
-  failedLoginCount  Int       @default(0) @map("failed_login_count")
-  lockedUntil       DateTime? @map("locked_until") @db.Timestamptz(6)
-  lastLoginAt       DateTime? @map("last_login_at") @db.Timestamptz(6)
-  lastLoginIp       String?   @map("last_login_ip")
+  failedLoginCount Int       @default(0) @map("failed_login_count")
+  lockedUntil      DateTime? @map("locked_until") @db.Timestamptz(6)
+  lastLoginAt      DateTime? @map("last_login_at") @db.Timestamptz(6)
+  lastLoginIp      String?   @map("last_login_ip")
 
   createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
   deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
 
-  roles          UserRole[]
-  sessions       UserSession[]
-  mfaFactors     UserMfaFactor[]
-  recoveryCodes  UserMfaRecoveryCode[]
-  customer       Customer?
-  auditLogs      AuditLog[]            @relation("AuditActor")
-  tokens         UserToken[]
+  roles         UserRole[]
+  sessions      UserSession[]
+  mfaFactors    UserMfaFactor[]
+  recoveryCodes UserMfaRecoveryCode[]
+  customer      Customer?
+  auditLogs     AuditLog[]            @relation("AuditActor")
+  tokens        UserToken[]
 
   @@index([status])
   @@index([type, status])
@@ -130,11 +130,11 @@ model RolePermission {
 }
 
 model UserRole {
-  userId     String    @map("user_id") @db.Uuid
-  roleId     String    @map("role_id") @db.Uuid
-  grantedBy  String?   @map("granted_by") @db.Uuid
-  grantedAt  DateTime  @default(now()) @map("granted_at") @db.Timestamptz(6)
-  expiresAt  DateTime? @map("expires_at") @db.Timestamptz(6)
+  userId    String    @map("user_id") @db.Uuid
+  roleId    String    @map("role_id") @db.Uuid
+  grantedBy String?   @map("granted_by") @db.Uuid
+  grantedAt DateTime  @default(now()) @map("granted_at") @db.Timestamptz(6)
+  expiresAt DateTime? @map("expires_at") @db.Timestamptz(6)
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
   role Role @relation(fields: [roleId], references: [id], onDelete: Restrict)
@@ -160,17 +160,17 @@ enum SessionRevocationReason {
 /// links it via `rotatedToId`, so replay of a consumed token is detectable and
 /// revokes the whole family.
 model UserSession {
-  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId            String    @map("user_id") @db.Uuid
-  familyId          String    @map("family_id") @db.Uuid
-  refreshTokenHash  String    @unique @map("refresh_token_hash")
-  issuedAt          DateTime  @default(now()) @map("issued_at") @db.Timestamptz(6)
-  expiresAt         DateTime  @map("expires_at") @db.Timestamptz(6)
-  lastUsedAt        DateTime? @map("last_used_at") @db.Timestamptz(6)
-  rotatedToId       String?   @unique @map("rotated_to_id") @db.Uuid
-  revokedAt         DateTime? @map("revoked_at") @db.Timestamptz(6)
-  revokedReason     SessionRevocationReason? @map("revoked_reason")
-  mfaSatisfied      Boolean   @default(false) @map("mfa_satisfied")
+  id               String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId           String                   @map("user_id") @db.Uuid
+  familyId         String                   @map("family_id") @db.Uuid
+  refreshTokenHash String                   @unique @map("refresh_token_hash")
+  issuedAt         DateTime                 @default(now()) @map("issued_at") @db.Timestamptz(6)
+  expiresAt        DateTime                 @map("expires_at") @db.Timestamptz(6)
+  lastUsedAt       DateTime?                @map("last_used_at") @db.Timestamptz(6)
+  rotatedToId      String?                  @unique @map("rotated_to_id") @db.Uuid
+  revokedAt        DateTime?                @map("revoked_at") @db.Timestamptz(6)
+  revokedReason    SessionRevocationReason? @map("revoked_reason")
+  mfaSatisfied     Boolean                  @default(false) @map("mfa_satisfied")
 
   // Coarse device attribution for the "active sessions" screen. IP is stored
   // truncated (see SessionService) — we do not need full precision.
@@ -180,8 +180,8 @@ model UserSession {
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  user       User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  rotatedTo  UserSession? @relation("SessionRotation", fields: [rotatedToId], references: [id], onDelete: SetNull)
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  rotatedTo   UserSession? @relation("SessionRotation", fields: [rotatedToId], references: [id], onDelete: SetNull)
   rotatedFrom UserSession? @relation("SessionRotation")
 
   @@index([userId, revokedAt])
@@ -248,13 +248,13 @@ enum UserTokenType {
 
 /// Single-use, hashed, short-lived tokens for out-of-band flows.
 model UserToken {
-  id        String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId    String        @map("user_id") @db.Uuid
-  type      UserTokenType
-  tokenHash String        @unique @map("token_hash")
-  expiresAt DateTime      @map("expires_at") @db.Timestamptz(6)
-  consumedAt DateTime?    @map("consumed_at") @db.Timestamptz(6)
-  createdAt DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  id         String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId     String        @map("user_id") @db.Uuid
+  type       UserTokenType
+  tokenHash  String        @unique @map("token_hash")
+  expiresAt  DateTime      @map("expires_at") @db.Timestamptz(6)
+  consumedAt DateTime?     @map("consumed_at") @db.Timestamptz(6)
+  createdAt  DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -281,7 +281,7 @@ model Customer {
   updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
   deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
 
-  user      User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user      User              @relation(fields: [userId], references: [id], onDelete: Cascade)
   addresses CustomerAddress[]
   consents  CustomerConsent[]
 
@@ -337,16 +337,16 @@ enum ConsentType {
 /// Append-only consent ledger. Withdrawal is recorded as a new row with
 /// granted=false; rows are never updated or deleted.
 model CustomerConsent {
-  id         String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  customerId String      @map("customer_id") @db.Uuid
-  type       ConsentType
-  granted    Boolean
+  id              String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  customerId      String      @map("customer_id") @db.Uuid
+  type            ConsentType
+  granted         Boolean
   /// Version identifier of the policy text the customer agreed to.
-  documentVersion String? @map("document_version")
-  source     String?
-  ipAddress  String?     @map("ip_address")
-  userAgent  String?     @map("user_agent")
-  createdAt  DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  documentVersion String?     @map("document_version")
+  source          String?
+  ipAddress       String?     @map("ip_address")
+  userAgent       String?     @map("user_agent")
+  createdAt       DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
 
   customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
 
@@ -433,16 +433,16 @@ model SystemSetting {
 }
 
 model FeatureFlag {
-  id          String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  key         String  @unique
-  description String?
-  enabled     Boolean @default(false)
+  id                 String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  key                String   @unique
+  description        String?
+  enabled            Boolean  @default(false)
   /// 0-100. Deterministic bucketing on a stable subject key.
-  rolloutPercentage Int @default(0) @map("rollout_percentage")
+  rolloutPercentage  Int      @default(0) @map("rollout_percentage")
   /// Explicit allow-list of subject keys (user id / customer id) that always
   /// receive the flag regardless of rollout percentage.
   enabledForSubjects String[] @default([]) @map("enabled_for_subjects")
-  updatedBy   String? @map("updated_by") @db.Uuid
+  updatedBy          String?  @map("updated_by") @db.Uuid
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
@@ -523,18 +523,18 @@ enum MediaKind {
 /// SHA-256 of the bytes, which is what makes re-uploading the same file a
 /// no-op rather than a second copy.
 model Media {
-  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  kind        MediaKind @default(IMAGE)
-  storageKey  String    @unique @map("storage_key")
-  bucket      String
-  mimeType    String    @map("mime_type")
-  sizeBytes   Int       @map("size_bytes")
-  checksum    String
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  kind             MediaKind @default(IMAGE)
+  storageKey       String    @unique @map("storage_key")
+  bucket           String
+  mimeType         String    @map("mime_type")
+  sizeBytes        Int       @map("size_bytes")
+  checksum         String
   /// Null for documents and for images whose dimensions could not be read.
-  width       Int?
-  height      Int?
-  originalFilename String? @map("original_filename")
-  uploadedBy  String?   @map("uploaded_by") @db.Uuid
+  width            Int?
+  height           Int?
+  originalFilename String?   @map("original_filename")
+  uploadedBy       String?   @map("uploaded_by") @db.Uuid
 
   createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
@@ -599,31 +599,31 @@ model Product {
 
   type ProductType
 
-  brand            String?
-  manufacturer     String?
+  brand           String?
+  manufacturer    String?
   /// ISO 3166-1 alpha-2 country of origin.
-  countryOfOrigin  String? @map("country_of_origin")
+  countryOfOrigin String? @map("country_of_origin")
 
-  status           ProductStatus    @default(DRAFT)
-  complianceStatus ComplianceStatus @default(NOT_REVIEWED) @map("compliance_status")
-  complianceApprovedAt DateTime?    @map("compliance_approved_at") @db.Timestamptz(6)
-  complianceApprovedBy String?      @map("compliance_approved_by") @db.Uuid
+  status                ProductStatus    @default(DRAFT)
+  complianceStatus      ComplianceStatus @default(NOT_REVIEWED) @map("compliance_status")
+  complianceApprovedAt  DateTime?        @map("compliance_approved_at") @db.Timestamptz(6)
+  complianceApprovedBy  String?          @map("compliance_approved_by") @db.Uuid
   /// Approvals expire so a listing reviewed years ago does not stay live by
   /// default. Driven by `compliance.claims_review_interval_days`.
-  complianceReviewDueAt DateTime?   @map("compliance_review_due_at") @db.Timestamptz(6)
+  complianceReviewDueAt DateTime?        @map("compliance_review_due_at") @db.Timestamptz(6)
 
   publishedAt DateTime? @map("published_at") @db.Timestamptz(6)
 
   /// Money is integer minor units. A float price is not an acceptable
   /// property for anything a customer is charged.
-  priceCents          Int     @map("price_cents")
-  compareAtPriceCents Int?    @map("compare_at_price_cents")
-  costCents           Int?    @map("cost_cents")
-  currency            String  @default("USD")
+  priceCents          Int    @map("price_cents")
+  compareAtPriceCents Int?   @map("compare_at_price_cents")
+  costCents           Int?   @map("cost_cents")
+  currency            String @default("USD")
 
-  taxable  Boolean @default(true)
+  taxable Boolean @default(true)
   /// Provider-specific tax classification (e.g. a TaxJar or Avalara code).
-  taxCode  String? @map("tax_code")
+  taxCode String? @map("tax_code")
 
   weightGrams Int? @map("weight_grams")
   lengthMm    Int? @map("length_mm")
@@ -648,14 +648,15 @@ model Product {
   updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
   deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
 
-  variants        ProductVariant[]
-  images          ProductImage[]
-  categories      ProductCategory[]
-  ingredients     ProductIngredient[]
-  attributeValues ProductAttributeValue[]
-  warnings        ProductWarning[]
-  disclaimers     ProductDisclaimer[]
+  variants          ProductVariant[]
+  images            ProductImage[]
+  categories        ProductCategory[]
+  ingredients       ProductIngredient[]
+  attributeValues   ProductAttributeValue[]
+  warnings          ProductWarning[]
+  disclaimers       ProductDisclaimer[]
   complianceReviews ComplianceReview[]
+  orderItems        OrderItem[]
 
   @@index([status, publishedAt])
   @@index([type, status])
@@ -669,8 +670,8 @@ model ProductVariant {
   id        String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   productId String @map("product_id") @db.Uuid
 
-  sku  String  @unique
-  name String
+  sku     String  @unique
+  name    String
   /// Retail barcode (UPC/EAN/GTIN), used by 3PLs and marketplaces.
   barcode String?
 
@@ -692,8 +693,11 @@ model ProductVariant {
   updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
   deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
 
-  product Product        @relation(fields: [productId], references: [id], onDelete: Cascade)
-  images  ProductImage[]
+  product    Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  images     ProductImage[]
+  inventory  InventoryItem[]
+  cartItems  CartItem[]
+  orderItems OrderItem[]
 
   @@index([productId, position])
   @@map("product_variants")
@@ -793,16 +797,16 @@ enum AttributeType {
 /// "servings"). Kept separate from values so the facet list can be built
 /// without scanning every product.
 model ProductAttribute {
-  id       String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  key      String        @unique
-  label    String
-  type     AttributeType @default(TEXT)
-  unit     String?
+  id            String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  key           String        @unique
+  label         String
+  type          AttributeType @default(TEXT)
+  unit          String?
   /// Whether this attribute appears as a storefront filter.
-  isFilterable Boolean   @default(false) @map("is_filterable")
-  position Int           @default(0)
+  isFilterable  Boolean       @default(false) @map("is_filterable")
+  position      Int           @default(0)
   /// Permitted values when `type` is ENUM.
-  allowedValues String[] @default([]) @map("allowed_values")
+  allowedValues String[]      @default([]) @map("allowed_values")
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
@@ -817,7 +821,7 @@ model ProductAttributeValue {
   attributeId String @map("attribute_id") @db.Uuid
 
   /// Canonical string form, used for faceting and equality filters.
-  value       String
+  value        String
   /// Populated for NUMBER attributes so range filters can use an index.
   numericValue Decimal? @map("numeric_value") @db.Decimal(14, 4)
 
@@ -844,20 +848,20 @@ model ProductAttributeValue {
 /// answerable as "which products contain this?", and that is only possible if
 /// the relationship is modelled.
 model Ingredient {
-  id             String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   /// Unique among live rows only; see the partial index in the migration.
   slug           String
   name           String
   /// Binomial or INCI name where one exists.
-  scientificName String? @map("scientific_name")
+  scientificName String?  @map("scientific_name")
   commonNames    String[] @default([]) @map("common_names")
   description    String?
   /// CAS registry number, where the substance has one.
-  casNumber      String? @map("cas_number")
+  casNumber      String?  @map("cas_number")
 
   /// Major allergen under the US FALCPA/FASTER list, if applicable.
-  allergen       String?
-  isAllergen     Boolean @default(false) @map("is_allergen")
+  allergen   String?
+  isAllergen Boolean @default(false) @map("is_allergen")
 
   createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
@@ -883,13 +887,13 @@ enum IngredientSourceType {
 }
 
 model IngredientSource {
-  id           String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  ingredientId String               @map("ingredient_id") @db.Uuid
-  type         IngredientSourceType
-  description  String?
+  id            String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  ingredientId  String               @map("ingredient_id") @db.Uuid
+  type          IngredientSourceType
+  description   String?
   /// Country the material is sourced from, where known.
-  originCountry String?             @map("origin_country")
-  supplier     String?
+  originCountry String?              @map("origin_country")
+  supplier      String?
 
   isVegan      Boolean @default(false) @map("is_vegan")
   isVegetarian Boolean @default(false) @map("is_vegetarian")
@@ -944,8 +948,8 @@ model ProductIngredient {
 
   /// Amount per serving, in `unit`. Null where the formulation does not
   /// disclose it (a proprietary blend), which is itself worth showing.
-  amount Decimal? @db.Decimal(14, 4)
-  unit   String?
+  amount            Decimal? @db.Decimal(14, 4)
+  unit              String?
   /// Percent Daily Value, where one is established.
   dailyValuePercent Decimal? @map("daily_value_percent") @db.Decimal(6, 2)
 
@@ -1041,9 +1045,9 @@ model ComplianceReview {
   /// Required. A decision without reasoning is not a review.
   notes     String
 
-  reviewerId    String   @map("reviewer_id") @db.Uuid
-  reviewerLabel String   @map("reviewer_label")
-  decidedAt     DateTime @default(now()) @map("decided_at") @db.Timestamptz(6)
+  reviewerId    String    @map("reviewer_id") @db.Uuid
+  reviewerLabel String    @map("reviewer_label")
+  decidedAt     DateTime  @default(now()) @map("decided_at") @db.Timestamptz(6)
   /// When this approval lapses and the listing must be re-reviewed.
   reviewDueAt   DateTime? @map("review_due_at") @db.Timestamptz(6)
 
@@ -1087,12 +1091,12 @@ model Page {
 
   /// Draft content held separately, so editing a live page does not change
   /// what visitors see until it is published.
-  draftBlocks Json? @map("draft_blocks")
+  draftBlocks Json?   @map("draft_blocks")
   draftTitle  String? @map("draft_title")
 
-  publishedAt   DateTime? @map("published_at") @db.Timestamptz(6)
-  publishedBy   String?   @map("published_by") @db.Uuid
-  lastEditedBy  String?   @map("last_edited_by") @db.Uuid
+  publishedAt  DateTime? @map("published_at") @db.Timestamptz(6)
+  publishedBy  String?   @map("published_by") @db.Uuid
+  lastEditedBy String?   @map("last_edited_by") @db.Uuid
 
   createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
@@ -1118,14 +1122,14 @@ model SeoMetadata {
   entityType SeoEntityType @map("entity_type")
   entityId   String        @map("entity_id") @db.Uuid
 
-  title           String?
-  description     String?
-  canonicalUrl    String? @map("canonical_url")
-  ogTitle         String? @map("og_title")
-  ogDescription   String? @map("og_description")
-  ogImageMediaId  String? @map("og_image_media_id") @db.Uuid
+  title          String?
+  description    String?
+  canonicalUrl   String? @map("canonical_url")
+  ogTitle        String? @map("og_title")
+  ogDescription  String? @map("og_description")
+  ogImageMediaId String? @map("og_image_media_id") @db.Uuid
   /// Excludes the page from the sitemap and emits a noindex robots directive.
-  noindex         Boolean @default(false)
+  noindex        Boolean @default(false)
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
@@ -1135,4 +1139,659 @@ model SeoMetadata {
   @@unique([entityType, entityId])
   @@index([ogImageMediaId])
   @@map("seo_metadata")
+}
+
+// ===========================================================================
+// Phase 3 — Commerce
+//
+// Money is always an integer number of minor units. There is no decimal or
+// float anywhere in this section: a cent that goes missing to binary rounding
+// is a cent that has to be reconciled by a person.
+//
+// Every monetary total on an order is *stored*, not recomputed on read. A
+// customer's invoice must say what they were charged, not what today's prices
+// and tax rules would produce.
+// ===========================================================================
+
+model Warehouse {
+  id   String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code String @unique
+  name String
+
+  line1      String
+  line2      String?
+  city       String
+  region     String
+  postalCode String  @map("postal_code")
+  country    String  @default("US")
+
+  /// Lower numbers are preferred when allocating stock.
+  priority Int     @default(0)
+  isActive Boolean @default(true) @map("is_active")
+
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  stock       InventoryItem[]
+  adjustments InventoryAdjustment[]
+  shipments   Shipment[]
+
+  @@index([isActive, priority])
+  @@map("warehouses")
+}
+
+/// Stock for one variant in one warehouse.
+///
+/// `onHand` is what is physically there. `reserved` is what is spoken for by
+/// carts and unfulfilled orders. Available stock is the difference, and it is
+/// derived rather than stored so the two can never disagree.
+model InventoryItem {
+  id          String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  variantId   String @map("variant_id") @db.Uuid
+  warehouseId String @map("warehouse_id") @db.Uuid
+
+  onHandQuantity   Int @default(0) @map("on_hand_quantity")
+  reservedQuantity Int @default(0) @map("reserved_quantity")
+
+  /// Below this, the product is flagged for reordering. Not a sales control.
+  reorderPoint   Int     @default(0) @map("reorder_point")
+  /// When false, the variant can be sold past zero and back-ordered.
+  trackInventory Boolean @default(true) @map("track_inventory")
+  allowBackorder Boolean @default(false) @map("allow_backorder")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  variant      ProductVariant         @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  warehouse    Warehouse              @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+  reservations InventoryReservation[]
+  adjustments  InventoryAdjustment[]
+
+  @@unique([variantId, warehouseId])
+  @@index([warehouseId])
+  @@map("inventory_items")
+}
+
+enum InventoryReservationStatus {
+  /// Held for a cart or a checkout in progress.
+  HELD
+  /// The order was placed; the hold now belongs to the order.
+  COMMITTED
+  /// Stock left the building. The reservation is closed and on-hand dropped.
+  CONSUMED
+  /// Released back to available stock.
+  RELEASED
+  /// Expired without being committed.
+  EXPIRED
+}
+
+/// A claim on specific stock.
+///
+/// Reservations exist so two customers cannot buy the last unit. A held
+/// reservation expires: an abandoned checkout must not keep stock out of
+/// circulation indefinitely.
+model InventoryReservation {
+  id              String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  inventoryItemId String @map("inventory_item_id") @db.Uuid
+
+  quantity Int
+  status   InventoryReservationStatus @default(HELD)
+
+  /// What the reservation is for. Exactly one is set.
+  cartId  String? @map("cart_id") @db.Uuid
+  orderId String? @map("order_id") @db.Uuid
+
+  expiresAt  DateTime? @map("expires_at") @db.Timestamptz(6)
+  releasedAt DateTime? @map("released_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  inventoryItem InventoryItem @relation(fields: [inventoryItemId], references: [id], onDelete: Cascade)
+  cart          Cart?         @relation(fields: [cartId], references: [id], onDelete: SetNull)
+  order         Order?        @relation(fields: [orderId], references: [id], onDelete: SetNull)
+
+  @@index([inventoryItemId, status])
+  @@index([cartId])
+  @@index([orderId])
+  @@index([status, expiresAt])
+  @@map("inventory_reservations")
+}
+
+enum InventoryAdjustmentReason {
+  RECEIPT
+  CYCLE_COUNT
+  DAMAGE
+  EXPIRY
+  THEFT
+  RETURN
+  CORRECTION
+  FULFILMENT
+}
+
+/// Append-only ledger of every change to on-hand stock.
+///
+/// Stock levels are a running total; this is the arithmetic behind it. Without
+/// the ledger, "we are eleven units short" has no answer.
+model InventoryAdjustment {
+  id              String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  inventoryItemId String @map("inventory_item_id") @db.Uuid
+  warehouseId     String @map("warehouse_id") @db.Uuid
+
+  /// Signed. Negative removes stock.
+  quantityDelta   Int @map("quantity_delta")
+  /// On-hand after this adjustment, so the ledger can be audited without replay.
+  resultingOnHand Int @map("resulting_on_hand")
+
+  reason    InventoryAdjustmentReason
+  reference String?
+  notes     String?
+
+  actorId    String? @map("actor_id") @db.Uuid
+  actorLabel String? @map("actor_label")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  inventoryItem InventoryItem @relation(fields: [inventoryItemId], references: [id], onDelete: Cascade)
+  warehouse     Warehouse     @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+
+  @@index([inventoryItemId, createdAt])
+  @@index([warehouseId, createdAt])
+  @@map("inventory_adjustments")
+}
+
+enum CartStatus {
+  ACTIVE
+  /// Converted into an order.
+  CONVERTED
+  /// Abandoned past the retention window.
+  ABANDONED
+}
+
+/// A shopping cart.
+///
+/// A guest cart is addressed by an opaque token held in an httpOnly cookie; it
+/// is not addressable by id from the browser. On sign-in the guest cart is
+/// merged into the customer's, rather than either being silently discarded.
+model Cart {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  /// Opaque bearer token for a guest cart. Null once the cart has an owner.
+  token      String? @unique
+  customerId String? @map("customer_id") @db.Uuid
+
+  status   CartStatus @default(ACTIVE)
+  currency String     @default("USD")
+
+  /// Free-text note from the customer, shown to the warehouse.
+  note String?
+
+  /// Snapshot of the last quote, so a page render does not have to reprice.
+  /// Authoritative pricing is always recomputed server-side at checkout.
+  subtotalCents Int @default(0) @map("subtotal_cents")
+  discountCents Int @default(0) @map("discount_cents")
+  shippingCents Int @default(0) @map("shipping_cents")
+  taxCents      Int @default(0) @map("tax_cents")
+  totalCents    Int @default(0) @map("total_cents")
+
+  expiresAt   DateTime? @map("expires_at") @db.Timestamptz(6)
+  convertedAt DateTime? @map("converted_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  items        CartItem[]
+  reservations InventoryReservation[]
+  checkouts    Checkout[]
+
+  @@index([customerId, status])
+  @@index([status, updatedAt])
+  @@map("carts")
+}
+
+model CartItem {
+  id        String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  cartId    String @map("cart_id") @db.Uuid
+  variantId String @map("variant_id") @db.Uuid
+
+  quantity Int
+
+  /// The price quoted when the item went in, kept so a change can be shown to
+  /// the customer rather than silently applied. It is never what they are
+  /// charged — checkout reprices from the catalogue.
+  quotedUnitPriceCents Int      @map("quoted_unit_price_cents")
+  quotedAt             DateTime @default(now()) @map("quoted_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  cart    Cart           @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  variant ProductVariant @relation(fields: [variantId], references: [id], onDelete: Restrict)
+
+  @@unique([cartId, variantId])
+  @@index([variantId])
+  @@map("cart_items")
+}
+
+enum CheckoutStatus {
+  /// Collecting addresses and a shipping choice.
+  OPEN
+  /// Totals are locked and a payment intent exists.
+  AWAITING_PAYMENT
+  /// Payment succeeded; the order has been placed.
+  COMPLETED
+  /// Abandoned or explicitly cancelled.
+  CANCELLED
+  /// The hold expired before payment.
+  EXPIRED
+}
+
+/// One attempt to turn a cart into an order.
+///
+/// Separate from both cart and order because it is the thing that can be
+/// retried. The idempotency key is the customer's guarantee that a double
+/// submit, a retried request or a flaky network produces one order rather than
+/// two.
+model Checkout {
+  id     String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  cartId String @map("cart_id") @db.Uuid
+
+  /// Supplied by the client, unique per checkout attempt.
+  idempotencyKey String @unique @map("idempotency_key")
+
+  status   CheckoutStatus @default(OPEN)
+  currency String         @default("USD")
+
+  email String?
+
+  /// Addresses are copied in, not referenced: an order must keep the address it
+  /// was shipped to even if the customer later edits their address book.
+  shippingAddress Json? @map("shipping_address")
+  billingAddress  Json? @map("billing_address")
+
+  shippingMethodCode String? @map("shipping_method_code")
+
+  /// Locked totals. Recomputed server-side; never accepted from the client.
+  subtotalCents Int @default(0) @map("subtotal_cents")
+  discountCents Int @default(0) @map("discount_cents")
+  shippingCents Int @default(0) @map("shipping_cents")
+  taxCents      Int @default(0) @map("tax_cents")
+  totalCents    Int @default(0) @map("total_cents")
+
+  /// A hash of the priced lines. If the cart changes underneath, the customer
+  /// is shown the difference instead of being charged the old total.
+  pricingFingerprint String? @map("pricing_fingerprint")
+
+  expiresAt   DateTime? @map("expires_at") @db.Timestamptz(6)
+  completedAt DateTime? @map("completed_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  cart     Cart      @relation(fields: [cartId], references: [id], onDelete: Restrict)
+  payments Payment[]
+  order    Order?
+
+  @@index([cartId, status])
+  @@index([status, expiresAt])
+  @@map("checkouts")
+}
+
+enum OrderStatus {
+  PENDING_PAYMENT
+  PAID
+  PROCESSING
+  PARTIALLY_SHIPPED
+  SHIPPED
+  DELIVERED
+  CANCELLED
+  REFUNDED
+  PARTIALLY_REFUNDED
+}
+
+enum PaymentStatus {
+  REQUIRES_PAYMENT
+  PROCESSING
+  AUTHORIZED
+  CAPTURED
+  FAILED
+  CANCELLED
+  REFUNDED
+  PARTIALLY_REFUNDED
+}
+
+enum FulfilmentStatus {
+  UNFULFILLED
+  PARTIALLY_FULFILLED
+  FULFILLED
+  CANCELLED
+}
+
+model Order {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  /// Customer-facing reference. Never recycled, never guessable from the id.
+  reference String @unique
+
+  checkoutId String? @unique @map("checkout_id") @db.Uuid
+  customerId String? @map("customer_id") @db.Uuid
+
+  /// Kept on the order so a guest order is still reachable, and so a deleted
+  /// customer record does not orphan the financial history.
+  email String
+
+  status           OrderStatus      @default(PENDING_PAYMENT)
+  paymentStatus    PaymentStatus    @default(REQUIRES_PAYMENT)
+  fulfilmentStatus FulfilmentStatus @default(UNFULFILLED)
+
+  currency String @default("USD")
+
+  /// Stored totals. An invoice says what was charged, not what today's prices
+  /// would produce.
+  subtotalCents       Int @map("subtotal_cents")
+  discountCents       Int @default(0) @map("discount_cents")
+  shippingCents       Int @default(0) @map("shipping_cents")
+  taxCents            Int @default(0) @map("tax_cents")
+  totalCents          Int @map("total_cents")
+  amountPaidCents     Int @default(0) @map("amount_paid_cents")
+  amountRefundedCents Int @default(0) @map("amount_refunded_cents")
+
+  shippingAddress Json  @map("shipping_address")
+  billingAddress  Json? @map("billing_address")
+
+  shippingMethodCode String? @map("shipping_method_code")
+  shippingMethodName String? @map("shipping_method_name")
+
+  customerNote String? @map("customer_note")
+  internalNote String? @map("internal_note")
+
+  placedAt    DateTime  @default(now()) @map("placed_at") @db.Timestamptz(6)
+  paidAt      DateTime? @map("paid_at") @db.Timestamptz(6)
+  cancelledAt DateTime? @map("cancelled_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  checkout     Checkout?              @relation(fields: [checkoutId], references: [id], onDelete: SetNull)
+  items        OrderItem[]
+  events       OrderEvent[]
+  payments     Payment[]
+  refunds      Refund[]
+  shipments    Shipment[]
+  reservations InventoryReservation[]
+
+  @@index([customerId, placedAt])
+  @@index([status, placedAt])
+  @@index([email])
+  @@map("orders")
+}
+
+/// A line on an order.
+///
+/// Product and variant details are copied in rather than joined at read time.
+/// A listing can be renamed, repriced or withdrawn; an order line must still
+/// say what was bought and what it cost.
+model OrderItem {
+  id      String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  orderId String @map("order_id") @db.Uuid
+
+  /// Kept for reporting. Restrict on delete, because products are soft-deleted
+  /// precisely so historical orders stay readable.
+  productId String @map("product_id") @db.Uuid
+  variantId String @map("variant_id") @db.Uuid
+
+  sku         String
+  productName String @map("product_name")
+  variantName String @map("variant_name")
+
+  quantity          Int
+  unitPriceCents    Int @map("unit_price_cents")
+  /// quantity × unit price, before order-level discount and tax.
+  lineSubtotalCents Int @map("line_subtotal_cents")
+  discountCents     Int @default(0) @map("discount_cents")
+  taxCents          Int @default(0) @map("tax_cents")
+  lineTotalCents    Int @map("line_total_cents")
+
+  quantityFulfilled Int @default(0) @map("quantity_fulfilled")
+  quantityRefunded  Int @default(0) @map("quantity_refunded")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  order   Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product        @relation(fields: [productId], references: [id], onDelete: Restrict)
+  variant ProductVariant @relation(fields: [variantId], references: [id], onDelete: Restrict)
+
+  @@index([orderId])
+  @@index([productId])
+  @@index([variantId])
+  @@map("order_items")
+}
+
+/// Append-only history of what happened to an order.
+///
+/// Enforced by a database trigger. An order timeline that could be edited is
+/// not a record of anything, and this is the first place anyone looks when a
+/// customer disputes a charge.
+model OrderEvent {
+  id      String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  orderId String @map("order_id") @db.Uuid
+
+  type    String
+  message String
+
+  /// Structured context. Never contains card data or full payment credentials.
+  data Json?
+
+  actorId    String? @map("actor_id") @db.Uuid
+  actorLabel String? @map("actor_label")
+  /// True when the system did it rather than a person.
+  isSystem   Boolean @default(false) @map("is_system")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId, createdAt])
+  @@map("order_events")
+}
+
+/// A payment against a checkout and, once placed, an order.
+///
+/// No card data is stored, ever — not a PAN, not a CVV, not an expiry. The
+/// provider's identifiers and the last four digits are the most this table is
+/// allowed to hold, and the last four exist only so a customer can recognise
+/// which card they used.
+model Payment {
+  id         String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  checkoutId String? @map("checkout_id") @db.Uuid
+  orderId    String? @map("order_id") @db.Uuid
+
+  provider           String
+  /// The provider's intent/charge identifier. Unique per provider.
+  providerPaymentId  String  @map("provider_payment_id")
+  providerCustomerId String? @map("provider_customer_id")
+
+  status   PaymentStatus @default(REQUIRES_PAYMENT)
+  currency String        @default("USD")
+
+  amountCents         Int @map("amount_cents")
+  amountCapturedCents Int @default(0) @map("amount_captured_cents")
+  amountRefundedCents Int @default(0) @map("amount_refunded_cents")
+
+  /// Display only. "visa", "4242". Never enough to charge anything.
+  cardBrand String? @map("card_brand")
+  cardLast4 String? @map("card_last4")
+
+  failureCode    String? @map("failure_code")
+  failureMessage String? @map("failure_message")
+
+  authorizedAt DateTime? @map("authorized_at") @db.Timestamptz(6)
+  capturedAt   DateTime? @map("captured_at") @db.Timestamptz(6)
+  failedAt     DateTime? @map("failed_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  checkout Checkout? @relation(fields: [checkoutId], references: [id], onDelete: SetNull)
+  order    Order?    @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  refunds  Refund[]
+
+  @@unique([provider, providerPaymentId])
+  @@index([checkoutId])
+  @@index([orderId])
+  @@index([status])
+  @@map("payments")
+}
+
+enum RefundStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+}
+
+enum RefundReason {
+  REQUESTED_BY_CUSTOMER
+  DAMAGED
+  NOT_AS_DESCRIBED
+  NOT_DELIVERED
+  RECALL
+  DUPLICATE
+  FRAUDULENT
+  GOODWILL
+  OTHER
+}
+
+model Refund {
+  id        String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  orderId   String @map("order_id") @db.Uuid
+  paymentId String @map("payment_id") @db.Uuid
+
+  provider         String
+  providerRefundId String? @map("provider_refund_id")
+
+  status      RefundStatus @default(PENDING)
+  amountCents Int          @map("amount_cents")
+  currency    String       @default("USD")
+
+  reason RefundReason
+  /// A refund without a stated reason is not auditable. Required by validation.
+  notes  String
+
+  /// Which lines this refund covers, when it is line-scoped rather than a
+  /// whole-order amount.
+  lines Json?
+
+  /// Supplied by the caller so a retried request does not refund twice.
+  idempotencyKey String @unique @map("idempotency_key")
+
+  actorId    String @map("actor_id") @db.Uuid
+  actorLabel String @map("actor_label")
+
+  failureCode    String? @map("failure_code")
+  failureMessage String? @map("failure_message")
+
+  processedAt DateTime? @map("processed_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  order   Order   @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  payment Payment @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+
+  @@index([orderId])
+  @@index([paymentId])
+  @@map("refunds")
+}
+
+enum ShipmentStatus {
+  PENDING
+  LABEL_PURCHASED
+  IN_TRANSIT
+  DELIVERED
+  CANCELLED
+  EXCEPTION
+}
+
+model Shipment {
+  id          String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  orderId     String  @map("order_id") @db.Uuid
+  warehouseId String? @map("warehouse_id") @db.Uuid
+
+  provider           String
+  providerShipmentId String? @map("provider_shipment_id")
+
+  status  ShipmentStatus @default(PENDING)
+  carrier String?
+  service String?
+
+  trackingNumber String? @map("tracking_number")
+  trackingUrl    String? @map("tracking_url")
+  labelUrl       String? @map("label_url")
+
+  shippedAt   DateTime? @map("shipped_at") @db.Timestamptz(6)
+  deliveredAt DateTime? @map("delivered_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  order     Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  warehouse Warehouse?     @relation(fields: [warehouseId], references: [id], onDelete: SetNull)
+  items     ShipmentItem[]
+
+  @@index([orderId])
+  @@index([status])
+  @@map("shipments")
+}
+
+model ShipmentItem {
+  id          String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  shipmentId  String @map("shipment_id") @db.Uuid
+  orderItemId String @map("order_item_id") @db.Uuid
+
+  quantity Int
+
+  shipment Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+
+  @@unique([shipmentId, orderItemId])
+  @@index([orderItemId])
+  @@map("shipment_items")
+}
+
+/// A shipping option a customer can choose.
+///
+/// Rates are configuration, not code: what a business charges for delivery
+/// changes without a deploy. The `conditions` column holds the weight and
+/// subtotal bounds a rate applies within.
+model ShippingRate {
+  id          String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code        String  @unique
+  name        String
+  description String?
+
+  /// ISO 3166-1 alpha-2 codes, and US state codes for domestic zones.
+  countries String[]
+  regions   String[]
+
+  priceCents             Int  @map("price_cents")
+  /// Above this subtotal the rate is free. Null means never.
+  freeAboveSubtotalCents Int? @map("free_above_subtotal_cents")
+
+  minWeightGrams   Int? @map("min_weight_grams")
+  maxWeightGrams   Int? @map("max_weight_grams")
+  minSubtotalCents Int? @map("min_subtotal_cents")
+  maxSubtotalCents Int? @map("max_subtotal_cents")
+
+  estimatedDaysMin Int? @map("estimated_days_min")
+  estimatedDaysMax Int? @map("estimated_days_max")
+
+  position Int     @default(0)
+  isActive Boolean @default(true) @map("is_active")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([isActive, position])
+  @@map("shipping_rates")
 }

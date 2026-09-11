@@ -10,7 +10,7 @@ import { AuditService } from '../audit/audit.service.js';
 import { CATALOGUE_AUDIT_ACTIONS } from '../catalogue/catalogue.audit.js';
 import { SettingsService } from '../settings/settings.service.js';
 import { PublishChecklistService } from '../catalogue/publishing/publish-checklist.service.js';
-import type { ActorContext } from '../rbac/roles.service.js';
+import { requireNamedActor, type ActorContext } from '../rbac/roles.service.js';
 
 export interface ComplianceReviewView {
   id: string;
@@ -109,8 +109,12 @@ export class ComplianceService {
   async decide(
     productId: string,
     input: ComplianceDecisionInput,
-    actor: ActorContext,
+    rawActor: ActorContext,
   ): Promise<{ review: ComplianceReviewView; readiness: PublishReadiness }> {
+    // A compliance decision is a statement by a named person, and the column is
+    // non-nullable to enforce it.
+    const actor = requireNamedActor(rawActor);
+
     const product = await this.prisma.product.findFirst({
       where: { id: productId, deletedAt: null },
     });

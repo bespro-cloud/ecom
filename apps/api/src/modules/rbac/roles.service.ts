@@ -20,11 +20,40 @@ export interface RoleView {
 }
 
 export interface ActorContext {
-  actorId: string;
+  /**
+   * Null for a guest.
+   *
+   * Not every action is taken by a signed-in user: a guest checkout is a real
+   * actor with a real audit trail and no user record. The audit log has always
+   * modelled this (`actorId` is nullable there); this type now says so too,
+   * rather than forcing call sites to invent an id.
+   */
+  actorId: string | null;
   actorLabel: string;
   correlationId: string;
   ipAddress?: string | null;
   userAgent?: string | null;
+}
+
+/** An actor that is definitely a signed-in person. */
+export interface NamedActorContext extends ActorContext {
+  actorId: string;
+}
+
+/**
+ * Asserts that an action is being taken by a signed-in person.
+ *
+ * Some records require a named human by design — a compliance decision, a
+ * refund — and their columns are non-nullable to enforce it. Rather than
+ * casting the guest case away at each call site, this makes the requirement
+ * explicit and fails loudly if a route that should be authenticated ever
+ * becomes reachable without a session.
+ */
+export function requireNamedActor(actor: ActorContext): NamedActorContext {
+  if (!actor.actorId) {
+    throw new Error('This action requires a signed-in user, but the actor has no user id.');
+  }
+  return actor as NamedActorContext;
 }
 
 /**

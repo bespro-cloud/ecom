@@ -1,5 +1,5 @@
 {
-  "name": "@health/types",
+  "name": "@health/payments",
   "version": "0.1.0",
   "private": true,
   "main": "./dist/index.js",
@@ -15,12 +15,14 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "dev": "tsc -p tsconfig.json --watch",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src",
-    "clean": "rm -rf dist .turbo",
     "test": "vitest run",
-    "test:unit": "vitest run"
+    "test:unit": "vitest run",
+    "clean": "rm -rf dist .turbo"
+  },
+  "dependencies": {
+    "@health/types": "workspace:*"
   },
   "devDependencies": {
     "typescript": "5.7.3",

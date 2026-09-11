@@ -16,6 +16,7 @@ import {
 import { PrismaService } from '../../../infrastructure/prisma/prisma.service.js';
 import { CLOCK } from '../../../infrastructure/config/config.module.js';
 import { SettingsService } from '../../settings/settings.service.js';
+import { WarehousesService } from '../../commerce/inventory/warehouses.service.js';
 
 /**
  * The product publishing gate.
@@ -30,28 +31,58 @@ import { SettingsService } from '../../settings/settings.service.js';
  *     reports `NOT_YET_ENFORCED` and is listed explicitly. A checklist that
  *     silently approves is worse than no checklist, because it looks like
  *     assurance.
- *  2. **The required set is configuration, not code.** What a business must
- *     verify before publishing is a legal question. `catalog.publish_checklist`
- *     holds the answer, and an operator can tighten it without a deploy.
+ *  2. **Which checks block is configuration, not code.** What a business must
+ *     verify before publishing is a legal question, so an operator can relax a
+ *     check without a deploy — but the default is that every implemented check
+ *     blocks, and a relaxed check is still evaluated and still reported.
  *  3. **The gate is evaluated server-side at the moment of the transition**,
  *     not when the admin screen was rendered. A stale screen cannot publish a
  *     product that has since lost its compliance approval.
  */
+/**
+ * The highest phase whose checks are actually evaluated.
+ *
+ * Anything declared for a later phase reports `NOT_YET_ENFORCED`. Bumping this
+ * constant is the one edit that turns a declared check into an enforced one,
+ * so it is deliberately a single, visible line rather than a number repeated
+ * through the file.
+ */
+const IMPLEMENTED_THROUGH_PHASE = 3;
+
 @Injectable()
 export class PublishChecklistService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly settings: SettingsService,
+    private readonly warehouses: WarehousesService,
     @Inject(CLOCK) private readonly clock: Clock,
   ) {}
 
-  /** Checks an operator has marked required. Defaults to every implemented check. */
+  /**
+   * The checks that block publication.
+   *
+   * **Every implemented check is required unless an operator has explicitly
+   * relaxed it.** The configuration is therefore a list of *relaxations*
+   * (`catalog.publish_checklist_relaxed`), not a list of requirements.
+   *
+   * That inversion is deliberate, and it replaced an inclusion list that was
+   * subtly fail-open: with a stored list of required keys, adding a new check
+   * to the codebase meant every existing deployment silently did not enforce
+   * it, because the key was absent from a value written before it existed.
+   * Absence would have meant "not required" when it actually meant "nobody has
+   * decided". On a gate that governs what health products customers can see,
+   * the safe reading of silence is that the check applies.
+   *
+   * Relaxing a check never hides it: the finding is still evaluated and still
+   * reported, it simply does not block.
+   */
   private async requiredChecks(): Promise<Set<PublishCheckKey>> {
-    const configured = await this.settings.get<string[]>('catalog.publish_checklist');
-    if (Array.isArray(configured) && configured.length > 0) {
-      return new Set(configured as PublishCheckKey[]);
-    }
-    return new Set(PUBLISH_CHECK_DEFINITIONS.map((check) => check.key));
+    const relaxed = await this.settings.get<string[]>('catalog.publish_checklist_relaxed');
+    const excluded = new Set(Array.isArray(relaxed) ? relaxed : []);
+
+    return new Set(
+      PUBLISH_CHECK_DEFINITIONS.map((check) => check.key).filter((key) => !excluded.has(key)),
+    );
   }
 
   async evaluate(productId: string): Promise<PublishReadiness> {
@@ -92,7 +123,9 @@ export class PublishChecklistService {
     const required = await this.requiredChecks();
     const type = product.type as ProductType;
 
-    const results: PublishCheckResult[] = PUBLISH_CHECK_DEFINITIONS.map((definition) => {
+    const results: PublishCheckResult[] = [];
+
+    for (const definition of PUBLISH_CHECK_DEFINITIONS) {
       const base = {
         key: definition.key,
         label: definition.label,
@@ -102,33 +135,39 @@ export class PublishChecklistService {
 
       // Not applicable to this product type — an accessory has no label panel.
       if (definition.appliesTo && !definition.appliesTo.includes(type)) {
-        return { ...base, state: 'NOT_APPLICABLE' as const };
+        results.push({ ...base, state: 'NOT_APPLICABLE' as const });
+        continue;
       }
 
       // The domain that would evaluate this does not exist yet. Reported
       // plainly; it cannot block, because nobody could satisfy it.
-      if (definition.implementedInPhase > 2) {
-        return {
+      if (definition.implementedInPhase > IMPLEMENTED_THROUGH_PHASE) {
+        results.push({
           ...base,
           state: 'NOT_YET_ENFORCED' as const,
           detail: `Evaluated from Phase ${definition.implementedInPhase}.`,
-        };
+        });
+        continue;
       }
 
-      const outcome = this.runCheck(definition, product, seo, type);
+      const outcome =
+        definition.key === 'INVENTORY_CONFIGURED'
+          ? await this.checkInventory(productId)
+          : this.runCheck(definition, product, seo, type);
 
       // An operator has excluded this check from the required set: report the
       // real finding, but do not block on it.
       if (outcome.state === 'FAIL' && !required.has(definition.key)) {
-        return {
+        results.push({
           ...base,
           state: 'NOT_APPLICABLE' as const,
           detail: `${outcome.detail ?? 'Not satisfied.'} Not required by the configured checklist.`,
-        };
+        });
+        continue;
       }
 
-      return { ...base, ...outcome };
-    });
+      results.push({ ...base, ...outcome });
+    }
 
     return summarisePublishReadiness(results);
   }
@@ -357,6 +396,33 @@ export class PublishChecklistService {
       return { state: 'FAIL' as const, detail: 'No primary category, so no canonical URL.' };
     }
     return { state: 'PASS' as const };
+  }
+
+  /**
+   * Whether the warehouse could actually fill an order for this product.
+   *
+   * Publishing something that cannot be allocated produces orders nobody can
+   * fulfil, which is a worse customer experience than the listing simply not
+   * being there yet.
+   */
+  private async checkInventory(
+    productId: string,
+  ): Promise<{ state: 'PASS' | 'FAIL'; detail?: string }> {
+    const result = await this.warehouses.isConfiguredForSale(productId);
+
+    if (result.variantCount === 0) {
+      return {
+        state: 'FAIL',
+        detail: 'The product has no active variant, so there is nothing to stock or sell.',
+      };
+    }
+    if (!result.ok) {
+      return {
+        state: 'FAIL',
+        detail: `No stock record in an active warehouse for: ${result.missing.slice(0, 3).join(', ')}.`,
+      };
+    }
+    return { state: 'PASS' };
   }
 
   private checkCompliance(product: ProductForChecklist) {

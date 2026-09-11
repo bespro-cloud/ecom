@@ -17,7 +17,23 @@ export interface TestHarness {
 }
 
 const TRUNCATABLE = [
-  // Catalogue first: everything below it is referenced by these rows.
+  // Commerce first: these reference the catalogue rows below them.
+  'shipment_items',
+  'shipments',
+  'refunds',
+  'payments',
+  'order_events',
+  'order_items',
+  'orders',
+  'checkouts',
+  'cart_items',
+  'carts',
+  'inventory_adjustments',
+  'inventory_reservations',
+  'inventory_items',
+  'warehouses',
+  'shipping_rates',
+
   'compliance_reviews',
   'product_disclaimers',
   'product_warnings',
@@ -51,7 +67,13 @@ const TRUNCATABLE = [
 ];
 
 /** Tables a database trigger makes append-only. */
-const APPEND_ONLY = ['audit_logs', 'customer_consents', 'compliance_reviews'];
+const APPEND_ONLY = [
+  'audit_logs',
+  'customer_consents',
+  'compliance_reviews',
+  'order_events',
+  'inventory_adjustments',
+];
 
 export async function createHarness(): Promise<TestHarness> {
   const app = await createApp();

@@ -54,6 +54,38 @@ export const BASELINE_SETTINGS: SettingSeed[] = [
       'How long a newly invited privileged staff member may sign in before MFA enrolment is mandatory.',
   },
   {
+    key: 'cart.lifetime_days',
+    value: 30,
+    valueType: 'NUMBER',
+    description: 'How long an untouched basket survives before it is swept.',
+  },
+  {
+    key: 'inventory.reservation_minutes',
+    value: 30,
+    valueType: 'NUMBER',
+    description:
+      'How long a basket may hold stock before the reservation expires. Too long keeps stock out of circulation; too short loses baskets mid-checkout.',
+  },
+  {
+    key: 'checkout.hold_minutes',
+    value: 30,
+    valueType: 'NUMBER',
+    description: 'How long a checkout stays open before its stock is released.',
+  },
+  {
+    key: 'tax.rates_by_region',
+    value: {},
+    valueType: 'JSON',
+    description:
+      'Sales tax rate per US state, as a fraction. EMPTY BY DEFAULT AND DELIBERATELY SO: US sales tax is jurisdiction- and product-specific, and a real implementation is a tax-engine integration rather than a lookup table. While this is empty, orders are priced with no tax and the API reports that no rate was applied, so "not calculated" is never mistaken for "not taxable". Do not launch without advice from a tax professional.',
+  },
+  {
+    key: 'tax.shipping_taxable',
+    value: false,
+    valueType: 'BOOLEAN',
+    description: 'Whether delivery is taxable. Varies by state; confirm before relying on it.',
+  },
+  {
     key: 'compliance.disclaimer_supplement',
     value:
       'These statements have not been evaluated by the Food and Drug Administration. This product is not intended to diagnose, treat, cure, or prevent any disease.',
@@ -70,22 +102,11 @@ export const BASELINE_SETTINGS: SettingSeed[] = [
       'General health disclaimer required on every listing by the publishing checklist. Wording must be reviewed by counsel before launch.',
   },
   {
-    key: 'catalog.publish_checklist',
-    value: [
-      'PRODUCT_INFORMATION',
-      'PRICING',
-      'IMAGES',
-      'LABEL',
-      'INGREDIENTS',
-      'WARNINGS',
-      'DISCLAIMERS',
-      'SEO',
-      'CATEGORY',
-      'COMPLIANCE_APPROVED',
-    ],
+    key: 'catalog.publish_checklist_relaxed',
+    value: [],
     valueType: 'JSON',
     description:
-      'Checks that must pass before a product can be published. Removing a key does not stop the check being evaluated \u2014 the finding is still reported \u2014 it stops the finding from blocking publication. Which checks are legally required is a question for counsel, not a default.',
+      'Publishing checks an operator has deliberately relaxed. Every implemented check blocks publication unless its key is listed here; a relaxed check is still evaluated and still reported, it simply does not block. Empty by default, and it is the safe default: which checks are legally required is a question for counsel, and silence should never be read as "not required".',
   },
   {
     key: 'compliance.claims_review_interval_days',

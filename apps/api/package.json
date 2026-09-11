@@ -18,6 +18,7 @@
     "@health/auth": "workspace:*",
     "@health/config": "workspace:*",
     "@health/database": "workspace:*",
+    "@health/payments": "workspace:*",
     "@health/storage": "workspace:*",
     "@health/types": "workspace:*",
     "@health/validation": "workspace:*",

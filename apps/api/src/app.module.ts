@@ -17,6 +17,7 @@ import { StorageModule } from './modules/media/storage.provider.js';
 import { MediaModule } from './modules/media/media.module.js';
 import { CatalogueModule } from './modules/catalogue/catalogue.module.js';
 import { ContentModule } from './modules/content/content.module.js';
+import { CommerceModule } from './modules/commerce/commerce.module.js';
 import { ComplianceModule } from './modules/compliance/compliance.module.js';
 import { HealthModule } from './modules/health/health.module.js';
 import { CorrelationIdMiddleware } from './common/middleware/correlation-id.middleware.js';
@@ -58,6 +59,7 @@ import { RateLimitGuard } from './common/guards/rate-limit.guard.js';
     CatalogueModule,
     ContentModule,
     ComplianceModule,
+    CommerceModule,
     HealthModule,
   ],
   providers: [

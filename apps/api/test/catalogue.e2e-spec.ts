@@ -100,7 +100,43 @@ async function createDraftProduct(staff: SignedInStaff, overrides: object = {}) 
  * failing exactly one check, and building it inline five times would hide
  * which check each test is actually about.
  */
+/**
+ * Gives a product somewhere to be stocked.
+ *
+ * Phase 3 made `INVENTORY_CONFIGURED` a real check: a product cannot be
+ * published unless a warehouse could actually fill an order for it. These
+ * fixtures therefore need a variant with a stock record, the same as a real
+ * listing would.
+ */
+async function stockProduct(productId: string): Promise<void> {
+  const variant = await harness.prisma.productVariant.create({
+    data: {
+      productId,
+      sku: `V-${Math.random().toString(36).slice(2, 10).toUpperCase()}`,
+      name: 'Default',
+      isActive: true,
+    },
+  });
+
+  const warehouse = await harness.prisma.warehouse.create({
+    data: {
+      code: `WH${Math.random().toString(36).slice(2, 6).toUpperCase()}`,
+      name: 'Test warehouse',
+      line1: '1 Depot Road',
+      city: 'Salt Lake City',
+      region: 'UT',
+      postalCode: '84101',
+    },
+  });
+
+  await harness.prisma.inventoryItem.create({
+    data: { variantId: variant.id, warehouseId: warehouse.id, onHandQuantity: 100 },
+  });
+}
+
 async function makeReadyExceptCompliance(staff: SignedInStaff, productId: string) {
+  await stockProduct(productId);
+
   const [hero, label, facts] = await Promise.all([
     uploadImage(staff, { r: 250, g: 250, b: 250 }),
     uploadImage(staff, { r: 200, g: 200, b: 200 }),
@@ -303,7 +339,14 @@ describe('the publishing gate', () => {
     // signature is not expected there — that is what a reviewer is for — so it
     // is correctly absent from this refusal.
     expect(blockedBy(response)).toEqual(
-      expect.arrayContaining(['IMAGES', 'LABEL', 'INGREDIENTS', 'SEO', 'CATEGORY']),
+      expect.arrayContaining([
+        'IMAGES',
+        'LABEL',
+        'INGREDIENTS',
+        'SEO',
+        'CATEGORY',
+        'INVENTORY_CONFIGURED',
+      ]),
     );
 
     const stored = await harness.prisma.product.findUniqueOrThrow({ where: { id: product.id } });
@@ -340,11 +383,9 @@ describe('the publishing gate', () => {
       .get(`/api/v1/admin/catalogue/products/${product.id}/readiness`)
       .set(auth(staff));
 
-    expect(readiness.body.notYetEnforced.sort()).toEqual([
-      'CLAIMS_REVIEWED',
-      'EVIDENCE_REVIEWED',
-      'INVENTORY_CONFIGURED',
-    ]);
+    // Inventory became enforceable in Phase 3; claims and evidence arrive in
+    // Phase 4.
+    expect(readiness.body.notYetEnforced.sort()).toEqual(['CLAIMS_REVIEWED', 'EVIDENCE_REVIEWED']);
   });
 
   it('publishes once a compliance reviewer has approved it', async () => {
