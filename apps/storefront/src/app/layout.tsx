@@ -3,6 +3,7 @@ import { Inter } from 'next/font/google';
 import { SkipToContent } from '@health/ui';
 import { publicConfig } from '@/lib/env';
 import { currentUser } from '@/lib/session';
+import { fetchCart } from '@/lib/commerce';
 import { SiteHeader } from '@/components/site-header';
 import { SiteFooter } from '@/components/site-footer';
 import './globals.css';
@@ -46,11 +47,17 @@ export const viewport: Viewport = {
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const user = await currentUser();
 
+  // A failing basket lookup must not take the whole site down — the header can
+  // show nothing and every other page still works.
+  const cartCount = await fetchCart()
+    .then((cart) => cart.itemCount)
+    .catch(() => 0);
+
   return (
     <html lang="en" className={inter.variable}>
       <body className="flex min-h-screen flex-col font-sans">
         <SkipToContent />
-        <SiteHeader user={user} />
+        <SiteHeader user={user} cartCount={cartCount} />
         <main id="main-content" className="flex-1">
           {children}
         </main>

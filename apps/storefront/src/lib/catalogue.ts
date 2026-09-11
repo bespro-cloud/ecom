@@ -72,7 +72,16 @@ export interface ProductDetail {
   weightGrams: number | null;
   publishedAt: string | null;
   images: Array<CatalogueImage & { role: string }>;
-  variants: Array<{ id: string; sku: string; name: string; priceCents: number; options: unknown }>;
+  variants: Array<{
+    id: string;
+    sku: string;
+    name: string;
+    priceCents: number;
+    options: unknown;
+    availableQuantity: number | null;
+  }>;
+  /** Display only; the real stock decision is made at checkout. */
+  availableQuantity: number | null;
   categories: Array<{ name: string; slug: string; isPrimary: boolean }>;
   breadcrumbs: Array<{ name: string; slug: string }>;
   ingredients: Array<{

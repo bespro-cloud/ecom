@@ -22,6 +22,7 @@ function product(overrides: Partial<ProductDetail> = {}): ProductDetail {
     subscriptionEligible: false,
     weightGrams: 150,
     publishedAt: '2026-09-11T00:00:00.000Z',
+    availableQuantity: 12,
     images: [],
     variants: [],
     categories: [],

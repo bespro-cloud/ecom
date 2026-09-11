@@ -3,7 +3,7 @@ import type { PublicUser } from '@health/types';
 import { publicConfig } from '@/lib/env';
 import { SignOutButton } from './sign-out-button';
 
-export function SiteHeader({ user }: { user: PublicUser | null }) {
+export function SiteHeader({ user, cartCount }: { user: PublicUser | null; cartCount: number }) {
   return (
     <header className="sticky top-0 z-40 border-b border-slate-200 bg-white/95 backdrop-blur">
       <nav
@@ -29,6 +29,17 @@ export function SiteHeader({ user }: { user: PublicUser | null }) {
             className="rounded-lg px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
           >
             Products
+          </Link>
+          <Link
+            href="/cart"
+            className="rounded-lg px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
+          >
+            Basket
+            {cartCount > 0 ? (
+              <span className="ml-1.5 rounded-full bg-brand-600 px-1.5 py-0.5 text-xs font-semibold text-white">
+                {cartCount}
+              </span>
+            ) : null}
           </Link>
           {user ? (
             <>

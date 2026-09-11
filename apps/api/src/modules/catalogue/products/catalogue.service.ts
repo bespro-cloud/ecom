@@ -9,6 +9,7 @@ import {
 import type { CatalogueQuery } from '@health/validation';
 import { parseAttributeFilters } from '../search/query-parser.js';
 import { PrismaService } from '../../../infrastructure/prisma/prisma.service.js';
+import { InventoryService } from '../../commerce/inventory/inventory.service.js';
 import { AppException } from '../../../common/errors/app-exception.js';
 import { MediaUrlService } from '../../media/media-url.service.js';
 import { SEARCH_PROVIDER, type SearchFacets, type SearchProvider } from '../search/search.types.js';
@@ -30,6 +31,7 @@ export class CatalogueService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly mediaUrls: MediaUrlService,
+    private readonly inventory: InventoryService,
     private readonly logger: PinoLogger,
     @Inject(SEARCH_PROVIDER) private readonly search: SearchProvider,
   ) {
@@ -125,6 +127,10 @@ export class CatalogueService {
       where: { entityType_entityId: { entityType: 'PRODUCT', entityId: product.id } },
     });
 
+    const availability = await this.inventory.availability(
+      product.variants.map((variant) => variant.id),
+    );
+
     const inheritedWarnings = product.ingredients.flatMap((entry) =>
       entry.ingredient.warnings.map((warning) => ({
         severity: warning.severity,
@@ -192,7 +198,17 @@ export class CatalogueService {
         name: variant.name,
         priceCents: variant.priceCents ?? product.priceCents,
         options: variant.options,
+        availableQuantity: availability.get(variant.id) ?? null,
       })),
+      /**
+       * The availability of the only variant, when there is one.
+       *
+       * Explicitly a display figure, not a gate: by the time a customer acts on
+       * it it may be stale, and the real decision is made under a row lock at
+       * checkout. Null means "not tracked", which is not the same as zero.
+       */
+      availableQuantity:
+        product.variants.length === 1 ? (availability.get(product.variants[0]!.id) ?? null) : null,
       categories: product.categories.map((entry) => ({
         name: entry.category.name,
         slug: entry.category.slug,
@@ -412,7 +428,11 @@ export interface PublicProductDetail {
     name: string;
     priceCents: number;
     options: unknown;
+    /** Null when stock is not tracked, which is not the same as zero. */
+    availableQuantity: number | null;
   }>;
+  /** Display only; the real decision is made under a row lock at checkout. */
+  availableQuantity: number | null;
   categories: Array<{ name: string; slug: string; isPrimary: boolean }>;
   breadcrumbs: Array<{ name: string; slug: string }>;
   ingredients: Array<{

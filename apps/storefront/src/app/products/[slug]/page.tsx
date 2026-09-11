@@ -7,6 +7,7 @@ import { publicConfig } from '@/lib/env';
 import { formatMoney } from '@/lib/format';
 import { BreadcrumbStructuredData, ProductStructuredData } from '@/components/structured-data';
 import { ProductGallery } from '@/components/product-gallery';
+import { AddToCart } from '@/components/add-to-cart';
 
 async function load(slug: string): Promise<ProductDetail> {
   try {
@@ -113,15 +114,12 @@ export default async function ProductPage({ params }: { params: Promise<{ slug: 
             </p>
           ) : null}
 
-          {/*
-            There is no "add to basket" yet: the cart, pricing and inventory
-            arrive in Phase 3. A button that did nothing, or that pretended to
-            reserve stock, would be worse than its absence.
-          */}
-          <p className="mt-6 rounded-lg bg-slate-100 px-4 py-3 text-sm text-slate-700">
-            Ordering opens once checkout is live. Everything below is the listing record as it
-            stands today.
-          </p>
+          <div className="mt-6">
+            <AddToCart
+              variantId={product.variants[0]?.id ?? ''}
+              availableQuantity={product.availableQuantity ?? null}
+            />
+          </div>
 
           {product.allergens.length > 0 ? (
             <section
