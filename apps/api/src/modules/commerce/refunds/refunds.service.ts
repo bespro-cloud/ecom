@@ -62,7 +62,14 @@ export class RefundsService {
           'That idempotency key has already been used for a different order.',
         );
       }
-      return existing;
+      // A FAILED attempt is not an outcome to replay. Returning it would make a
+      // transient provider failure permanent under this key — the operator
+      // retries, gets a success-shaped response carrying a failed refund, and
+      // the provider is never asked again. Instead the attempt is re-driven
+      // below against the same row, under the same key: if the first attempt
+      // did reach the provider after all, the provider collapses the duplicate
+      // and returns the original refund rather than issuing a second.
+      if (existing.status !== 'FAILED') return existing;
     }
 
     const order = await this.prisma.order.findUnique({
@@ -94,31 +101,46 @@ export class RefundsService {
     // between the call and the response, there is a record to reconcile
     // against rather than money that left with no trace.
     let refund;
-    try {
-      refund = await this.prisma.refund.create({
-        data: {
-          orderId,
-          paymentId: payment.id,
-          provider: payment.provider,
-          status: 'PENDING',
-          amountCents,
-          currency: order.currency,
-          reason: input.reason,
-          notes: input.notes,
-          lines: (input.lines ?? null) as never,
-          idempotencyKey: input.idempotencyKey,
-          actorId: actor.actorId,
-          actorLabel: actor.actorLabel,
-        },
-      });
-    } catch (error) {
-      if (isUniqueConstraintError(error, 'idempotency_key')) {
-        // Two concurrent requests with the same key; the other won.
-        return this.prisma.refund.findUniqueOrThrow({
-          where: { idempotencyKey: input.idempotencyKey },
-        });
+    if (existing) {
+      // Re-driving a previously failed attempt. The amount is taken from the
+      // stored row rather than recomputed, so a retry cannot quietly become a
+      // refund for a different sum than the one that was authorised.
+      if (existing.amountCents !== amountCents) {
+        throw AppException.conflict(
+          'That idempotency key was used for a different amount. Use a new key.',
+        );
       }
-      throw error;
+      refund = await this.prisma.refund.update({
+        where: { id: existing.id },
+        data: { status: 'PENDING', failureCode: null, failureMessage: null },
+      });
+    } else {
+      try {
+        refund = await this.prisma.refund.create({
+          data: {
+            orderId,
+            paymentId: payment.id,
+            provider: payment.provider,
+            status: 'PENDING',
+            amountCents,
+            currency: order.currency,
+            reason: input.reason,
+            notes: input.notes,
+            lines: (input.lines ?? null) as never,
+            idempotencyKey: input.idempotencyKey,
+            actorId: actor.actorId,
+            actorLabel: actor.actorLabel,
+          },
+        });
+      } catch (error) {
+        if (isUniqueConstraintError(error, 'idempotency_key')) {
+          // Two concurrent requests with the same key; the other won.
+          return this.prisma.refund.findUniqueOrThrow({
+            where: { idempotencyKey: input.idempotencyKey },
+          });
+        }
+        throw error;
+      }
     }
 
     let providerResult;

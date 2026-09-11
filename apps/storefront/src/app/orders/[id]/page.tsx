@@ -39,8 +39,13 @@ export default async function OrderPage({
     <div className="mx-auto max-w-3xl px-4 py-10 sm:px-6 lg:px-8">
       {justPlaced ? (
         <Alert tone="success" title="Thank you — your order is placed">
-          We have emailed a confirmation to {order.email}. Your order reference is{' '}
-          <span className="font-mono font-medium">{order.reference}</span>.
+          {/*
+            Deliberately does not promise a confirmation email. Nothing sends
+            one yet, and telling a customer to watch their inbox for something
+            that will never arrive is worse than saying nothing.
+          */}
+          Your order reference is <span className="font-mono font-medium">{order.reference}</span>.
+          Keep this page bookmarked — you can come back to it from this browser at any time.
         </Alert>
       ) : null}
 

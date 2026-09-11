@@ -75,7 +75,7 @@ Changing a role assignment or a system setting requires a written reason, stored
 with the before and after state. "Why does this account have this access?" has an
 answer.
 
-### Publishing gate (built, Phase 2 — two checks await Phase 3/4)
+### Publishing gate (built, Phase 2 — two checks await Phase 4)
 
 A product cannot become publicly visible until a checklist passes. The gate is a
 hard block, not a warning, and it is evaluated server-side at the moment of the
@@ -96,7 +96,7 @@ publish a listing that has since lost its approval.
 | Compliance approved  | Phase 2   | Signed off, and not expired                           |
 | Claims reviewed      | Phase 4   | Reported `NOT_YET_ENFORCED` until then                |
 | Evidence reviewed    | Phase 4   | Reported `NOT_YET_ENFORCED` until then                |
-| Inventory configured | Phase 3   | Reported `NOT_YET_ENFORCED` until then                |
+| Inventory configured | Phase 3   | Every sellable variant stocked in an active warehouse |
 
 **Nothing passes by omission.** A check whose domain does not exist yet reports
 `NOT_YET_ENFORCED` and is listed explicitly, on the API and on the admin screen.
@@ -105,9 +105,17 @@ A checklist that quietly approves is worse than no checklist, because it looks
 like assurance.
 
 **Which checks are required is configuration**, held in
-`catalog.publish_checklist`. What a business must verify before publishing is a
-legal question, and an operator can tighten it without a deploy. Removing a key
-stops a finding from blocking publication; it does not stop the finding being
+`catalog.publish_checklist_relaxed`. What a business must verify before
+publishing is a legal question, and an operator can change it without a deploy.
+
+That setting is a **relaxation list, not an inclusion list**, and the direction
+matters more than it looks. Under an inclusion list, a check added in a later
+release does not appear in the stored list and therefore does not block — a new
+safeguard silently does nothing on every existing deployment, and nobody finds
+out. Under a relaxation list, every declared check blocks unless an operator has
+deliberately named it as relaxed, so the failure mode of forgetting to update
+configuration is a gate that is too strict rather than one that is not there.
+Naming a check stops it blocking publication; it does not stop the finding being
 evaluated or reported.
 
 **Allergen disclosure.** Under FALCPA, extended by the FASTER Act to include
@@ -128,6 +136,39 @@ name, the warnings, the disclaimers, the label or facts-panel photograph, or a
 new warning on any ingredient the product contains. The last is deliberately
 blunt — deciding which changes to safety information are minor enough to skip is
 not a judgement this system is entitled to make.
+
+### Order, payment and stock history (built, Phase 3)
+
+Three more histories are append-only at the database level, enforced by triggers
+that reject `UPDATE` and `DELETE` regardless of what the application asks for:
+
+- **Order events** — the record of what happened to an order and who did it.
+  Notes added by staff land here too, and cannot be edited or removed
+  afterwards.
+- **Inventory adjustments** — every movement of stock, signed, with a required
+  reason and the resulting on-hand figure, so a discrepancy is reconstructable
+  without replaying anything.
+- **Refunds** — attributable to a named person who completed multi-factor
+  authentication, with a written reason that cannot be edited.
+
+Money is never computed from anything a client sends. Prices come from the
+catalogue, shipping from configured rates, and the refund ceiling from what the
+payment provider says remains captured. Database `CHECK` constraints enforce the
+arithmetic independently: an order total must equal its parts, a refund cannot
+exceed what was paid, and stock cannot go negative — whatever the application
+believes.
+
+**Card data never reaches this application.** No interface in the system accepts
+a card number, an expiry or a security code, and there is no shape in which one
+could be passed. The order screen shows only the card brand and last four digits
+the provider reports, which are display strings and cannot be used to charge
+anything. That is what keeps the server out of PCI DSS scope, and it is not a
+setting.
+
+**Tax is not calculated.** A configured rate is applied, or none is and tax is
+zero with `taxRateApplied: null` so the two are distinguishable. This is not a
+sales tax determination and must not be treated as one; taking real money
+requires a tax engine integration first. See the Phase 3 notes in the roadmap.
 
 ### Claim lifecycle (Phase 4)
 

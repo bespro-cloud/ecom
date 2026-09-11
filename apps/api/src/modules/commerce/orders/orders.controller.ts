@@ -1,20 +1,29 @@
-import { Controller, Get, Param } from '@nestjs/common';
+import { Controller, Get, Param, Req } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import type { Request } from 'express';
 import { uuidSchema } from '@health/validation';
 import type { AuthenticatedPrincipal } from '@health/types';
-import { CurrentUser } from '../../../common/decorators/current-user.decorator.js';
+import { CurrentUser, OptionalUser } from '../../../common/decorators/current-user.decorator.js';
+import { Public } from '../../../common/decorators/public.decorator.js';
 import { ZodValidationPipe } from '../../../common/pipes/zod-validation.pipe.js';
 import { AppException } from '../../../common/errors/app-exception.js';
 import { PrismaService } from '../../../infrastructure/prisma/prisma.service.js';
+import { readCartToken } from '../cart/cart.cookie.js';
 import { OrdersService } from './orders.service.js';
 
 /**
  * A customer's own orders.
  *
- * Authenticated, and scoped by the caller's customer record on every route. An
- * order id in the path is never sufficient — the query is filtered by customer
- * id, so an id belonging to someone else simply does not exist as far as this
- * controller is concerned.
+ * An order id in the path is never sufficient. A signed-in customer's queries
+ * are filtered by their customer id, so an id belonging to someone else simply
+ * does not exist as far as this controller is concerned.
+ *
+ * A guest who has just checked out has no customer record, and would otherwise
+ * be unable to see what they had just bought. They are matched instead against
+ * the cart cookie that produced the order — an httpOnly credential they already
+ * hold, rather than a new token in a URL. A token in a URL ends up in access
+ * logs, browser history and `Referer` headers, which is the last place a
+ * bearer credential for someone's order should be.
  */
 @ApiTags('Orders')
 @Controller({ path: 'orders', version: '1' })
@@ -32,15 +41,34 @@ export class OrdersController {
   }
 
   @Get(':id')
-  @ApiOperation({ summary: 'One of your orders' })
+  @Public()
+  @ApiOperation({
+    summary: 'One of your orders',
+    description:
+      'Yours by customer record when signed in, or by the cart cookie that produced it when not.',
+  })
   async findOne(
     @Param('id', new ZodValidationPipe(uuidSchema)) id: string,
-    @CurrentUser() principal: AuthenticatedPrincipal,
+    @Req() request: Request,
+    @OptionalUser() principal?: AuthenticatedPrincipal,
   ) {
-    const customerId = await this.requireCustomerId(principal.userId);
+    const customerId = principal ? await this.requireCustomerId(principal.userId) : null;
+    const cartToken = readCartToken(request);
+
+    // Either a customer record that owns it, or the cart cookie the order came
+    // from. Never both optional: a request carrying neither matches nothing,
+    // because `customerId: null` would otherwise match every guest order and
+    // an absent token would match every order with an absent cart.
+    const ownership = customerId
+      ? { customerId }
+      : cartToken
+        ? { checkout: { cart: { token: cartToken } } }
+        : null;
+
+    if (!ownership) throw AppException.notFound('Order');
 
     const order = await this.prisma.order.findFirst({
-      where: { id, customerId },
+      where: { id, ...ownership },
       include: {
         items: { orderBy: { createdAt: 'asc' } },
         shipments: { orderBy: { createdAt: 'desc' } },

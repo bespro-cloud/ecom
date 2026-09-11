@@ -259,8 +259,11 @@ transition:
 `NOT_YET_ENFORCED` means the domain that would evaluate the check does not
 exist in this build. It is reported rather than counted as a pass, and it does
 not block, because nobody could satisfy it. Which checks are _required_ is
-configuration (`catalog.publish_checklist`); removing a key stops a finding
-blocking publication, it does not stop the finding being reported.
+configuration (`catalog.publish_checklist_relaxed`) — a **relaxation** list, not
+an inclusion list, so a check added in a later release blocks by default rather
+than silently doing nothing on deployments whose configuration predates it.
+Naming a check stops it blocking publication; it does not stop the finding being
+reported.
 
 Taking a live listing out of sale requires a `reason`, which is recorded.
 
@@ -283,6 +286,171 @@ satisfies one check, and the gate re-evaluates everything at the transition.
 
 Approvals expire after `compliance.claims_review_interval_days`. A rejection
 takes a live listing down immediately.
+
+## Cart · public
+
+A cart belongs to a browser, not an account. It is addressed by an httpOnly,
+`SameSite=Lax` token cookie the server sets; there is no cart id in any request
+body, so one customer cannot name another's cart. On sign-in the guest cart is
+merged into the customer's.
+
+| Endpoint                 | Purpose                                 |
+| ------------------------ | --------------------------------------- |
+| `GET /cart`              | The current cart, priced and with stock |
+| `POST /cart/items`       | Add a variant, by id and quantity       |
+| `PATCH /cart/items/:id`  | Change a line's quantity                |
+| `DELETE /cart/items/:id` | Remove a line                           |
+
+No request here carries a price. Every line is priced from the catalogue, and
+`availableQuantity` is read from live stock, so a line that can no longer be
+fulfilled says so before checkout rather than at payment.
+
+## Checkout · public
+
+| Endpoint                      | Purpose                                             |
+| ----------------------------- | --------------------------------------------------- |
+| `POST /checkout`              | Start one, under a caller-supplied idempotency key  |
+| `GET /checkout/:id`           | The current quote and available shipping options    |
+| `PATCH /checkout/:id`         | Set addresses and the shipping method               |
+| `POST /checkout/:id/prepare`  | Lock the total, hold stock, create a payment intent |
+| `POST /checkout/:id/complete` | Place the order once the provider confirms payment  |
+
+`POST /checkout` takes `idempotencyKey`, which has a unique constraint behind
+it. A double submit, a retried request or a browser that fired twice produces
+**one** checkout, and the second call returns the first result.
+
+`GET /checkout/:id` returns `pricingFingerprint` — a stable identity for the
+priced basket. `prepare` requires it back, and refuses with `422
+PRECONDITION_FAILED` if the basket or the catalogue moved underneath. The
+fingerprint is change detection, not a security token: it is neither secret nor
+signed, and nothing is authorised by it. Totals are recomputed server-side
+either way.
+
+`prepare` does four things in a fixed order: reprice, verify the fingerprint,
+reserve stock, then create the payment intent. Reserving before the intent
+exists is deliberate — money taken for goods that are not there is the worst
+outcome available, so a failure to reserve stops the payment ever being created.
+
+`complete` asks the provider whether the payment settled, rather than believing
+the caller. It is idempotent: calling it again returns the same order. Calling
+it before payment settles is refused with `422`.
+
+`taxRateApplied` is `null` when no tax rate is configured, which prices tax at
+zero and says so. That is distinguishable from a configured rate of zero, and
+neither is a tax calculation — see the Phase 3 notes in the roadmap.
+
+## Orders · customer
+
+| Endpoint          | Purpose                             |
+| ----------------- | ----------------------------------- |
+| `GET /orders`     | The signed-in customer's own orders |
+| `GET /orders/:id` | One order, in full                  |
+
+`GET /orders` requires a session and is scoped by the customer id on it, never
+by anything in the request.
+
+`GET /orders/:id` also accepts a guest: someone who has just checked out has no
+customer record, and is matched instead against the **cart cookie that produced
+the order** — an httpOnly credential they already hold. There is deliberately no
+token in the URL: a URL token ends up in access logs, browser history and
+`Referer` headers, which is the last place a bearer credential for someone's
+order should be. A request carrying neither credential, or the wrong one, gets
+`404` rather than `403` — confirming an order exists is itself information about
+someone else's purchase.
+
+No order confirmation email is sent yet; nothing in the product claims one is.
+
+## Payment webhooks
+
+`POST /webhooks/payments` · public by route, authenticated by **signature**.
+
+The signature is the only thing distinguishing the provider from anyone else
+who can reach this URL, so:
+
+- The **raw request body** is verified, not a re-serialised object. Signatures
+  are computed over exact bytes and re-serialising JSON changes them. Raw-body
+  parsing is scoped to this route alone.
+- Comparison is constant-time, within a timestamp tolerance window, and accepts
+  multiple `v1` signatures so a webhook secret can be rotated without dropping
+  events.
+- An unverifiable payload is refused with `403` and recorded as an audit event.
+  Repeated failures here mean someone is probing the endpoint.
+- Events are deduplicated on the provider's own event id through a unique
+  constraint — not a read-then-write, which has a window in which two parallel
+  deliveries both pass the check and a capture is applied twice.
+- A verified event always answers `200`, duplicates included. A provider that
+  receives an error retries, so returning one for work already done produces an
+  infinite retry loop.
+
+## Commerce administration
+
+Under `/admin/commerce`. The permission split reflects who is trusted with what:
+looking at an order, stopping one, and giving money back are three different
+authorities.
+
+| Endpoint                         | Permission                 |
+| -------------------------------- | -------------------------- |
+| `GET /orders`, `GET /orders/:id` | `ORDER_READ`               |
+| `POST /orders/:id/notes`         | `ORDER_WRITE`              |
+| `POST /orders/:id/cancel`        | `ORDER_CANCEL`             |
+| `POST /orders/:id/refunds`       | `REFUND_ISSUE` **and MFA** |
+| `GET /orders/:id/refunds`        | `REFUND_READ`              |
+| `GET /inventory`                 | `INVENTORY_READ`           |
+| `POST /inventory`                | `INVENTORY_ADJUST`         |
+| `POST /inventory/adjustments`    | `INVENTORY_ADJUST`         |
+| `GET /inventory/:id/adjustments` | `INVENTORY_READ`           |
+| `GET /warehouses`                | `INVENTORY_READ`           |
+| `POST /warehouses`               | `INVENTORY_ADJUST`         |
+| `GET /shipping-rates`            | `ORDER_READ`               |
+| `POST /shipping-rates`           | `SYSTEM_SETTINGS`          |
+
+### Refunds
+
+`POST /orders/:id/refunds` requires MFA on the route, and `ORDER_MANAGER` — the
+role that holds `REFUND_ISSUE` — is itself marked as requiring MFA. This moves
+money out of the business.
+
+`amountCents` is the one place a caller names money, and it is a _request_: the
+server recomputes the ceiling from the order's own stored line totals and what
+the provider says remains captured, and refuses anything above it with `422`.
+Line-scoped refunds are computed from stored totals too, checked against what
+has already been refunded per line, so the same unit cannot be refunded twice.
+
+`idempotencyKey` is required and unique. A repeated key returns the refund it
+produced without touching the provider again — **unless** that attempt failed,
+in which case it is re-driven rather than replayed. Replaying a failure would
+make a transient provider outage permanent under that key; re-driving is safe
+because the same key goes to the provider, which collapses the duplicate if the
+first attempt did land after all. A retry that changes the amount under the same
+key is refused with `409`.
+
+`notes` is required, has a real minimum length, is attributed to a named person,
+and cannot be edited afterwards.
+
+`restock` is opt-in. Returning units to sellable stock before anyone has seen
+them come back is how a warehouse promises goods it does not have.
+
+### Inventory
+
+Three quantities, kept distinct: `onHandQuantity` is what is physically in the
+warehouse, `reservedQuantity` is what open orders have already claimed, and
+`availableQuantity` is the difference — the only one a customer can buy against.
+Stock leaves on-hand at fulfilment, not at checkout.
+
+Quantities never move by being set. `POST /inventory/adjustments` takes a signed
+`quantityDelta` with a required `reason`, and writes it to an append-only ledger
+alongside the resulting on-hand figure — so "we are eleven units short" is
+answerable months later. `POST /inventory` sets policy only (`reorderPoint`,
+`trackInventory`, `allowBackorder`).
+
+An adjustment that would take on-hand below zero, or below what is reserved for
+open orders, is refused with `409`. The database enforces the same floor with a
+CHECK constraint regardless of what the application asks for.
+
+Reservations are taken under `SELECT … FOR UPDATE` row locks, acquired in a
+fixed order sorted by variant id. The lock prevents two checkouts reading the
+same availability and both succeeding; the fixed order prevents them deadlocking
+against each other.
 
 ## Media
 

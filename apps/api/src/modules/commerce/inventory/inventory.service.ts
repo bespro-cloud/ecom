@@ -1,7 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { PinoLogger } from 'nestjs-pino';
 import { addSeconds, type Clock } from '@health/config';
-import { Prisma } from '@health/database';
+import { Prisma, releaseExpiredReservations } from '@health/database';
 import type { AdjustInventoryInput } from '@health/validation';
 import { PrismaService } from '../../../infrastructure/prisma/prisma.service.js';
 import { CLOCK } from '../../../infrastructure/config/config.module.js';
@@ -394,46 +394,15 @@ export class InventoryService {
    * belongs to a placed order and its stock is genuinely spoken for.
    */
   async releaseExpired(limit = 500): Promise<number> {
-    const now = this.clock.now();
-
-    const expired = await this.prisma.inventoryReservation.findMany({
-      where: { status: 'HELD', expiresAt: { lte: now } },
-      select: { id: true, inventoryItemId: true, quantity: true },
-      take: limit,
-    });
-    if (expired.length === 0) return 0;
-
-    let released = 0;
-    for (const reservation of expired) {
-      // One transaction each: a single failure must not strand the rest of the
-      // sweep, and each release is independent.
-      try {
-        await this.prisma.$transaction(async (tx) => {
-          const current = await tx.inventoryReservation.findUnique({
-            where: { id: reservation.id },
-            select: { status: true },
-          });
-          // It may have been committed between the query and now.
-          if (current?.status !== 'HELD') return;
-
-          await this.lockInventoryRow(tx, reservation.inventoryItemId);
-          await tx.inventoryItem.update({
-            where: { id: reservation.inventoryItemId },
-            data: { reservedQuantity: { decrement: reservation.quantity } },
-          });
-          await tx.inventoryReservation.update({
-            where: { id: reservation.id },
-            data: { status: 'EXPIRED', releasedAt: now },
-          });
-          released += 1;
-        });
-      } catch (error) {
-        this.logger.warn(
-          { err: error, reservationId: reservation.id },
-          'failed to release an expired reservation',
-        );
-      }
-    }
+    const released = await releaseExpiredReservations(
+      {
+        prisma: this.prisma,
+        now: () => this.clock.now(),
+        onError: (error, context) =>
+          this.logger.warn({ err: error, ...context }, 'failed to release an expired reservation'),
+      },
+      limit,
+    );
 
     if (released > 0) {
       this.logger.info({ released }, 'released expired stock reservations');

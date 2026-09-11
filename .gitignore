@@ -39,3 +39,6 @@ Thumbs.db
 
 # local data
 /data/
+
+# Redis dumps left behind by a locally-run redis-server.
+dump.rdb

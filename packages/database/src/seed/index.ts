@@ -3,6 +3,7 @@ import { syncRbac } from './rbac.js';
 import { seedSettings } from './settings.js';
 import { seedDevelopmentAccounts, SEED_ACCOUNTS, SEED_CUSTOMER } from './development.js';
 import { seedCatalogue } from './catalogue.js';
+import { seedCommerce } from './commerce.js';
 
 /**
  * Full development seed: reference data (safe everywhere) followed by
@@ -35,6 +36,11 @@ async function main(): Promise<void> {
 
     console.log('Seeding development catalogue...');
     await seedCatalogue(prisma);
+
+    // After the catalogue: stock records are created per variant, so the
+    // variants have to exist first.
+    console.log('Seeding warehouses, stock and shipping rates...');
+    await seedCommerce(prisma);
 
     console.log('\nDevelopment accounts (NOT for production use):');
     for (const account of SEED_ACCOUNTS) {

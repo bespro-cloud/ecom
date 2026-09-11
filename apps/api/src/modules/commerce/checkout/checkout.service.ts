@@ -1,7 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { PinoLogger } from 'nestjs-pino';
 import { addSeconds, type Clock } from '@health/config';
-import { isUniqueConstraintError } from '@health/database';
+import { expireStaleCheckouts, isUniqueConstraintError } from '@health/database';
 import {
   canTransitionCheckout,
   priceOrder,
@@ -427,34 +427,15 @@ export class CheckoutService {
 
   /** Releases an abandoned checkout's stock. Run on a schedule. */
   async expireStale(limit = 200): Promise<number> {
-    const now = this.clock.now();
-    const stale = await this.prisma.checkout.findMany({
-      where: { status: { in: ['OPEN', 'AWAITING_PAYMENT'] }, expiresAt: { lte: now } },
-      select: { id: true, cartId: true },
-      take: limit,
-    });
-
-    let expired = 0;
-    for (const checkout of stale) {
-      try {
-        // An order may have been placed since the query; never expire a
-        // checkout that produced one.
-        const order = await this.prisma.order.findFirst({
-          where: { checkoutId: checkout.id },
-          select: { id: true },
-        });
-        if (order) continue;
-
-        await this.prisma.checkout.update({
-          where: { id: checkout.id },
-          data: { status: 'EXPIRED' },
-        });
-        await this.inventory.release({ cartId: checkout.cartId });
-        expired += 1;
-      } catch (error) {
-        this.logger.warn({ err: error, checkoutId: checkout.id }, 'failed to expire a checkout');
-      }
-    }
+    const expired = await expireStaleCheckouts(
+      {
+        prisma: this.prisma,
+        now: () => this.clock.now(),
+        onError: (error, context) =>
+          this.logger.warn({ err: error, ...context }, 'failed to expire a checkout'),
+      },
+      limit,
+    );
 
     if (expired > 0) this.logger.info({ expired }, 'expired stale checkouts');
     return expired;

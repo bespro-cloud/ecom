@@ -15,12 +15,22 @@ import { NextResponse, type NextRequest } from 'next/server';
  */
 const PROTECTED_PREFIXES = ['/account'];
 
+/**
+ * Paths that need a session themselves but whose children do not.
+ *
+ * `/orders` lists a customer's order history and is meaningless without an
+ * account. `/orders/:id` is not: a guest who has just checked out reaches their
+ * own order through the cart cookie that produced it, and redirecting them to
+ * sign in would hide the confirmation for the purchase they just made.
+ */
+const PROTECTED_EXACT = ['/orders'];
+
 export function middleware(request: NextRequest): NextResponse {
   const { pathname } = request.nextUrl;
 
-  const needsSession = PROTECTED_PREFIXES.some(
-    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
-  );
+  const needsSession =
+    PROTECTED_EXACT.includes(pathname) ||
+    PROTECTED_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
   if (!needsSession) return NextResponse.next();
 
   const hasSession = request.cookies.has('hc_access') || request.cookies.has('hc_refresh');
@@ -32,5 +42,5 @@ export function middleware(request: NextRequest): NextResponse {
 }
 
 export const config = {
-  matcher: ['/account/:path*', '/account'],
+  matcher: ['/account/:path*', '/account', '/orders'],
 };

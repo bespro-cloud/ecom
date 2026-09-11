@@ -123,21 +123,118 @@ reviewer.
 
 ---
 
-## Phase 3 — Commerce 🔜 Next
+## Phase 3 — Commerce ✅ Complete
 
-- Cart (guest and authenticated, with merge on sign-in)
-- Server-side pricing — client totals are never trusted
-- Checkout with an idempotent state machine
-- Payment provider abstraction; card data never reaches this application
-- Verified, idempotent payment webhooks
-- Orders with an explicit state machine
-- Refunds
-- Inventory, reservations and warehouses
-- Shipping rates and the fulfilment provider interface
+**Delivered**
+
+- Cart for guests and signed-in customers, keyed by an httpOnly token cookie,
+  merged into the customer's cart on sign-in
+- A pure pricing engine over explicit inputs: integer minor units throughout,
+  order-level discount and tax allocated across lines by largest remainder so
+  line values always sum exactly to the order values
+- Checkout as an idempotent state machine, created under a caller-supplied key
+  behind a unique constraint; quotes carry a pricing fingerprint and a basket
+  that moved underneath is refused rather than silently repriced
+- A payment provider interface with a real Stripe Payment Intents adapter
+  (SCA/3-D Secure) and an isolated development adapter that production
+  configuration refuses to start with
+- Signature-verified webhooks: constant-time comparison, a timestamp tolerance
+  window, multiple signatures for secret rotation, the raw request body
+  preserved on that route alone, and deduplication through a unique constraint
+  on the provider's own event id
+- Orders with an explicit state machine, stored totals, and an append-only
+  timeline enforced by a database trigger
+- Refunds capped at what the provider says remains captured, attributable to a
+  named MFA-verified person with a written reason, idempotent by key, with
+  optional restocking
+- Inventory with warehouses, reservations and an append-only adjustment ledger;
+  `SELECT … FOR UPDATE` row locks taken in a fixed order, and CHECK constraints
+  that refuse negative stock regardless of what the application asks for
+- Shipping rates as configuration, quoted server-side and re-derived before
+  payment
+- Storefront cart, staged checkout, order history and order detail; admin
+  orders list and detail with the timeline, MFA-gated refunds, inventory,
+  warehouses and shipping rates
+- Scheduled sweeps that release expired reservations and expire abandoned
+  checkouts, shared with the API so the scheduled code is the tested code
+
+**The rules that shaped it**
+
+**Stock is held before payment exists.** Reprice → verify fingerprint → reserve
+stock → create the payment intent, in that order. Reversing the last two would
+produce the one outcome that must never happen: money taken for goods that are
+not there.
+
+**The provider decides whether money moved**, never the browser. Completion
+asks the provider or waits for a signature-verified webhook; the two paths
+converge on the same idempotent handler.
+
+**Card data never reaches this application.** No method on the provider
+interface accepts a PAN, an expiry or a CVV, and there is no shape in which one
+could be passed. The order screen shows only the brand and last four digits the
+provider reports.
+
+**Idempotency is a database constraint, not a check.** Checkouts, refunds and
+webhook events are each unique on their key; a retry loses the insert rather
+than passing a check that another request has already passed.
+
+**Verified**
+
+| Suite                     | Count | Against                  |
+| ------------------------- | ----: | ------------------------ |
+| Shared package unit tests |   229 | pure logic               |
+| Storefront unit tests     |    45 | pure logic               |
+| API unit tests            |    64 | pure logic               |
+| Database integration      |    17 | real PostgreSQL          |
+| API integration (e2e)     |   183 | real PostgreSQL + Redis  |
+| Worker integration        |     9 | real PostgreSQL + BullMQ |
+
+The commerce suite includes a three-way concurrent checkout race asserting that
+exactly one wins and stock never goes negative, a forged webhook that is
+refused, a replayed webhook that is deduplicated, a stale quote that is
+refused, and a refund that fails at the provider and is then successfully
+retried under the same key.
+
+The whole purchase path was additionally walked against the running API: add to
+cart, start checkout, restart it idempotently, price it, have a stale quote
+refused, prepare it, have completion refused before payment, settle it with a
+signed webhook, have a forged one rejected with 403 and a replay deduplicated,
+place the order, repeat completion idempotently, and confirm the reservation
+moved from the cart to the order as `COMMITTED`. The admin console was walked
+the same way as an MFA-verified administrator.
+
+**Not done in Phase 3**
+
+- **Tax is configuration, not calculation.** US sales tax is
+  origin/destination-dependent, jurisdiction-specific and product-category
+  specific; getting it right is a tax-engine integration. Until that exists the
+  rate is a configured fraction, and a deployment with none configured prices
+  tax at zero _and reports `taxRateApplied: null`_, so "no tax" is
+  distinguishable from "tax not calculated". No deployment should take real
+  money without that integration.
+- **Discount codes and promotions.** The pricing engine takes an order-level
+  discount and allocates it correctly; nothing yet produces one.
+- **Transactional email for orders.** Nothing sends an order confirmation,
+  shipping notice or refund notice. The confirmation page deliberately does not
+  claim one was sent. A guest reaches their order from the browser that placed
+  it; reaching it from another device needs the email that does not exist yet.
+- **Fulfilment.** Shipments have a schema and are shown on the order, but
+  nothing creates them and no carrier is integrated. Stock therefore leaves
+  `reserved` at cancellation or refund, never yet at shipment.
+- **The Stripe adapter has not been exercised against Stripe.** It is written
+  against the documented REST API and unit-tested against recorded shapes,
+  including webhook signature verification. It has not run against a real
+  Stripe account, and that is a prerequisite for taking real money.
+- **Automated browser E2E (Playwright).** Both front ends are still verified
+  against running services by hand. This has now slipped three phases.
+- **Variant editor.** Phase 2 flagged this as needed by Phase 3. Stock is held
+  per variant and the seeded catalogue has one variant per product, so it was
+  not blocking; it is still missing.
+- **Load testing.** No performance claim is made anywhere.
 
 ---
 
-## Phase 4 — Compliance
+## Phase 4 — Compliance 🔜 Next
 
 The reason this platform is custom rather than off the shelf.
 

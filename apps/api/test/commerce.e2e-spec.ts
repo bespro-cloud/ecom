@@ -1,6 +1,8 @@
-import type { DevelopmentPaymentProvider } from '@health/payments';
+import { DEV_REFUND_FAIL_ONCE_MARKER, type DevelopmentPaymentProvider } from '@health/payments';
 import { PAYMENT_PROVIDER } from '../src/modules/commerce/payments/payment.provider.js';
 import { createHarness, signedInStaff, type SignedInStaff, type TestHarness } from './harness.js';
+import { InventoryService } from '../src/modules/commerce/inventory/inventory.service.js';
+import { CheckoutService } from '../src/modules/commerce/checkout/checkout.service.js';
 
 let harness: TestHarness;
 
@@ -1006,6 +1008,86 @@ describe('refunds', () => {
     expect(order.amountRefundedCents).toBe(500);
   });
 
+  it('re-attempts a refund that failed at the provider, rather than replaying the failure', async () => {
+    // A transient provider outage must not make the refund permanently
+    // unissuable under that key. The operator retries with the same key; the
+    // attempt reaches the provider again, and the key still guarantees the
+    // customer is only ever credited once.
+    const { orderId } = await placedOrder(2400);
+    const staff = await refunder();
+    // The development adapter fails a refund under this key once, then succeeds.
+    const key = idemKey(DEV_REFUND_FAIL_ONCE_MARKER);
+
+    const body = {
+      idempotencyKey: key,
+      amountCents: 700,
+      reason: 'GOODWILL' as const,
+      notes: 'The provider was briefly unreachable; this is the retry.',
+    };
+
+    const send = () =>
+      harness
+        .http()
+        .post(`/api/v1/admin/commerce/orders/${orderId}/refunds`)
+        .set(auth(staff))
+        .send(body);
+
+    const first = await send();
+    expect(first.status).toBe(422);
+
+    // The failure is recorded rather than swallowed, so there is something to
+    // reconcile against if the retry never comes.
+    const failed = await harness.prisma.refund.findUniqueOrThrow({
+      where: { idempotencyKey: key },
+    });
+    expect(failed.status).toBe('FAILED');
+
+    const orderAfterFailure = await harness.prisma.order.findUniqueOrThrow({
+      where: { id: orderId },
+    });
+    expect(orderAfterFailure.amountRefundedCents).toBe(0);
+
+    const second = await send();
+    expect(second.status).toBe(201);
+    expect(second.body.status).toBe('SUCCEEDED');
+
+    // Still one refund row, and the customer is credited exactly once.
+    expect(await harness.prisma.refund.count({ where: { orderId } })).toBe(1);
+    const order = await harness.prisma.order.findUniqueOrThrow({ where: { id: orderId } });
+    expect(order.amountRefundedCents).toBe(700);
+
+    // A third call with the same key replays the success without touching the
+    // provider again.
+    const third = await send();
+    expect(third.status).toBe(201);
+    expect(third.body.id).toBe(second.body.id);
+    expect(await harness.prisma.refund.count({ where: { orderId } })).toBe(1);
+  });
+
+  it('refuses a retry that changes the amount under the same key', async () => {
+    const { orderId } = await placedOrder(2400);
+    const staff = await refunder();
+    const key = idemKey(`amount-drift-${DEV_REFUND_FAIL_ONCE_MARKER}`);
+
+    const send = (amountCents: number) =>
+      harness
+        .http()
+        .post(`/api/v1/admin/commerce/orders/${orderId}/refunds`)
+        .set(auth(staff))
+        .send({
+          idempotencyKey: key,
+          amountCents,
+          reason: 'GOODWILL' as const,
+          notes: 'Checking that a key cannot be reused for a different sum.',
+        });
+
+    await send(700).expect(422);
+    const drifted = await send(900);
+
+    expect(drifted.status).toBe(409);
+    expect(drifted.body.error.message).toMatch(/different amount/i);
+  });
+
   it('requires a written reason', async () => {
     const { orderId } = await placedOrder();
     const staff = await refunder();
@@ -1105,5 +1187,168 @@ describe('the publishing gate now checks inventory', () => {
       .set(auth(staff));
 
     expect(readiness.body.blockedBy).not.toContain('INVENTORY_CONFIGURED');
+  });
+});
+
+describe('housekeeping sweeps', () => {
+  /**
+   * These two run on a schedule in the worker, against the same shared
+   * implementation. They are the difference between abandoned baskets quietly
+   * consuming the warehouse and stock coming back — so they are tested here,
+   * against a real database, rather than trusted because they are short.
+   */
+  function sweeps() {
+    return {
+      inventory: harness.app.get(InventoryService),
+      checkouts: harness.app.get(CheckoutService),
+    };
+  }
+
+  it('returns stock held by a reservation whose hold has run out', async () => {
+    const fixture = await seedSellableProduct({ onHand: 10 });
+    await buy(fixture, { quantity: 3 });
+
+    const beforeSweep = await harness.prisma.inventoryItem.findFirstOrThrow({
+      where: { variantId: fixture.variantId },
+    });
+    expect(beforeSweep.reservedQuantity).toBeGreaterThan(0);
+
+    // Wind the hold back rather than waiting it out.
+    await harness.prisma.inventoryReservation.updateMany({
+      where: { status: 'HELD' },
+      data: { expiresAt: new Date(Date.now() - 60_000) },
+    });
+
+    const released = await sweeps().inventory.releaseExpired();
+    expect(released).toBeGreaterThan(0);
+
+    const after = await harness.prisma.inventoryItem.findFirstOrThrow({
+      where: { variantId: fixture.variantId },
+    });
+    expect(after.reservedQuantity).toBe(0);
+    // On-hand is untouched: nothing left the warehouse, it was only unpromised.
+    expect(after.onHandQuantity).toBe(beforeSweep.onHandQuantity);
+  });
+
+  it('is a no-op when run twice, so concurrent workers cannot double-release', async () => {
+    const fixture = await seedSellableProduct({ onHand: 10 });
+    await buy(fixture, { quantity: 2 });
+
+    await harness.prisma.inventoryReservation.updateMany({
+      where: { status: 'HELD' },
+      data: { expiresAt: new Date(Date.now() - 60_000) },
+    });
+
+    await sweeps().inventory.releaseExpired();
+    const afterFirst = await harness.prisma.inventoryItem.findFirstOrThrow({
+      where: { variantId: fixture.variantId },
+    });
+
+    expect(await sweeps().inventory.releaseExpired()).toBe(0);
+
+    const afterSecond = await harness.prisma.inventoryItem.findFirstOrThrow({
+      where: { variantId: fixture.variantId },
+    });
+    expect(afterSecond.reservedQuantity).toBe(afterFirst.reservedQuantity);
+  });
+
+  it('expires an abandoned checkout and releases what it was holding', async () => {
+    const fixture = await seedSellableProduct({ onHand: 10 });
+    const { checkoutId } = await buy(fixture, { quantity: 4 });
+
+    await harness.prisma.checkout.update({
+      where: { id: checkoutId },
+      data: { expiresAt: new Date(Date.now() - 60_000) },
+    });
+
+    expect(await sweeps().checkouts.expireStale()).toBe(1);
+
+    const checkout = await harness.prisma.checkout.findUniqueOrThrow({
+      where: { id: checkoutId },
+    });
+    expect(checkout.status).toBe('EXPIRED');
+
+    const stock = await harness.prisma.inventoryItem.findFirstOrThrow({
+      where: { variantId: fixture.variantId },
+    });
+    expect(stock.reservedQuantity).toBe(0);
+    expect(stock.onHandQuantity).toBe(10);
+  });
+
+  it('never expires a checkout that produced an order', async () => {
+    // The order is the fact. Expiring its checkout would release stock someone
+    // has already paid for — the one outcome these sweeps must never cause.
+    const fixture = await seedSellableProduct({ onHand: 10 });
+    const { agent, checkoutId } = await buy(fixture, {
+      quantity: 2,
+      shippingCode: await seedShippingRate(0),
+    });
+    await payAndComplete(agent, checkoutId);
+
+    await harness.prisma.checkout.update({
+      where: { id: checkoutId },
+      data: { status: 'OPEN', expiresAt: new Date(Date.now() - 60_000) },
+    });
+
+    expect(await sweeps().checkouts.expireStale()).toBe(0);
+
+    const stock = await harness.prisma.inventoryItem.findFirstOrThrow({
+      where: { variantId: fixture.variantId },
+    });
+    expect(stock.reservedQuantity).toBe(2);
+  });
+});
+
+describe('a guest can see the order they just placed', () => {
+  /**
+   * A guest checkout that leaves the customer with no way to see what they
+   * bought is not a finished checkout. The credential is the cart cookie they
+   * already hold — not a token in a URL, which would end up in access logs,
+   * browser history and Referer headers.
+   */
+  async function placeAsGuest() {
+    const fixture = await seedSellableProduct({ onHand: 10 });
+    const { agent, checkoutId } = await buy(fixture, { shippingCode: await seedShippingRate(0) });
+    const placed = await payAndComplete(agent, checkoutId);
+    return { agent, orderId: placed.body.orderId as string };
+  }
+
+  it('shows the order to the browser that placed it', async () => {
+    const { agent, orderId } = await placeAsGuest();
+
+    const response = await agent.get(`/api/v1/orders/${orderId}`);
+
+    expect(response.status).toBe(200);
+    expect(response.body.id).toBe(orderId);
+    expect(response.body.items.length).toBeGreaterThan(0);
+  });
+
+  it('hides it from a different browser', async () => {
+    const { orderId } = await placeAsGuest();
+
+    const stranger = await guest().get(`/api/v1/orders/${orderId}`);
+
+    // Not found rather than forbidden: confirming the order exists is itself
+    // information about someone else's purchase.
+    expect(stranger.status).toBe(404);
+  });
+
+  it('hides it from a request carrying no credential at all', async () => {
+    const { orderId } = await placeAsGuest();
+
+    const anonymous = await harness.http().get(`/api/v1/orders/${orderId}`);
+
+    expect(anonymous.status).toBe(404);
+  });
+
+  it('does not let one guest cart reach another guest order', async () => {
+    const { orderId } = await placeAsGuest();
+
+    // A second guest with a real cart cookie of their own, which must not
+    // match an order it did not produce.
+    const other = await placeAsGuest();
+    const crossed = await other.agent.get(`/api/v1/orders/${orderId}`);
+
+    expect(crossed.status).toBe(404);
   });
 });

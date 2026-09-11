@@ -38,6 +38,18 @@ import {
 export const DEV_DECLINE_CENTS = 1_00;
 export const DEV_PROVIDER_ERROR_CENTS = 2_00;
 export const DEV_REQUIRES_ACTION_CENTS = 3_00;
+/**
+ * A refund whose idempotency key contains this marker fails once, then succeeds.
+ *
+ * Models the case that matters most for retry behaviour: a provider that is
+ * briefly unreachable. A refund that only ever fails permanently, or only ever
+ * succeeds, never exercises the path where an operator retries.
+ *
+ * Keyed off the idempotency key rather than the amount, deliberately. Every
+ * small amount is one a real refund could plausibly be for, so an amount-keyed
+ * trigger eventually fires on a test — or a demo — that meant nothing by it.
+ */
+export const DEV_REFUND_FAIL_ONCE_MARKER = 'dev-fail-once';
 
 interface DevIntent {
   id: string;
@@ -66,6 +78,8 @@ export class DevelopmentPaymentProvider implements PaymentProvider {
   /** Maps an idempotency key to the intent it created. */
   private readonly byIdempotencyKey = new Map<string, string>();
   private readonly refunds = new Map<string, RefundResult>();
+  /** Idempotency keys that have already burned their one simulated outage. */
+  private readonly refundsFailedOnce = new Set<string>();
   private readonly now: () => Date;
   private readonly toleranceSeconds: number;
 
@@ -181,6 +195,19 @@ export class DevelopmentPaymentProvider implements PaymentProvider {
     if (existing) return existing;
 
     const intent = this.require(input.providerPaymentId);
+
+    if (
+      input.idempotencyKey.includes(DEV_REFUND_FAIL_ONCE_MARKER) &&
+      !this.refundsFailedOnce.has(input.idempotencyKey)
+    ) {
+      this.refundsFailedOnce.add(input.idempotencyKey);
+      throw new PaymentProviderError(
+        'The payment provider is temporarily unreachable.',
+        'PROVIDER_UNREACHABLE',
+        true,
+      );
+    }
+
     const refundable = intent.capturedCents - intent.refundedCents;
 
     if (input.amountCents > refundable) {
