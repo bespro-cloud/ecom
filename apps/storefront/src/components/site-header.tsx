@@ -24,6 +24,12 @@ export function SiteHeader({ user }: { user: PublicUser | null }) {
         </Link>
 
         <div className="flex items-center gap-1 sm:gap-3">
+          <Link
+            href="/products"
+            className="rounded-lg px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
+          >
+            Products
+          </Link>
           {user ? (
             <>
               <Link

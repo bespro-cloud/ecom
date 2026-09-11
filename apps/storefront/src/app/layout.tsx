@@ -22,10 +22,13 @@ export const metadata: Metadata = {
   },
   description:
     'A US wellness retailer that documents what is in each product, where it came from, and what the evidence does and does not show.',
+  // Indexing is decided per route now that there is a catalogue: `robots.ts`
+  // holds the site-wide policy, and a page that should not be indexed (a
+  // listing an editor marked noindex, a search result) says so itself. A blanket
+  // `index: false` here would silently override both.
   robots: {
-    // Nothing is published yet; the catalogue arrives in Phase 2.
-    index: false,
-    follow: false,
+    index: process.env.NEXT_PUBLIC_ALLOW_INDEXING === 'true',
+    follow: true,
   },
   openGraph: {
     type: 'website',

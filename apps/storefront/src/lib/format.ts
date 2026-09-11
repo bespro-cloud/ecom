@@ -2,8 +2,8 @@
  * Formatting helpers.
  *
  * All money is handled as integer minor units and formatted here; a float
- * never touches a price. (Used from Phase 3 onward; defined now so there is one
- * place for it.)
+ * never touches a price — `Intl.NumberFormat` sees the divided value only at
+ * the moment of rendering.
  */
 export function formatMoney(minorUnits: number, currency = 'USD', locale = 'en-US'): string {
   return new Intl.NumberFormat(locale, { style: 'currency', currency }).format(minorUnits / 100);
