@@ -2,6 +2,7 @@ import { createPrismaClient } from '../client.js';
 import { syncRbac } from './rbac.js';
 import { seedSettings } from './settings.js';
 import { seedDevelopmentAccounts, SEED_ACCOUNTS, SEED_CUSTOMER } from './development.js';
+import { seedCatalogue } from './catalogue.js';
 
 /**
  * Full development seed: reference data (safe everywhere) followed by
@@ -31,6 +32,9 @@ async function main(): Promise<void> {
 
     console.log('Seeding development accounts...');
     await seedDevelopmentAccounts(prisma);
+
+    console.log('Seeding development catalogue...');
+    await seedCatalogue(prisma);
 
     console.log('\nDevelopment accounts (NOT for production use):');
     for (const account of SEED_ACCOUNTS) {

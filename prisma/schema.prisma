@@ -506,3 +506,633 @@ model OutboxMessage {
   @@index([aggregateType, aggregateId])
   @@map("outbox_messages")
 }
+
+// ---------------------------------------------------------------------------
+// Media
+// ---------------------------------------------------------------------------
+
+enum MediaKind {
+  IMAGE
+  DOCUMENT
+}
+
+/// A file in object storage.
+///
+/// Binary data is never stored in PostgreSQL — only the storage key and the
+/// metadata needed to serve, deduplicate and audit it. `checksum` is the
+/// SHA-256 of the bytes, which is what makes re-uploading the same file a
+/// no-op rather than a second copy.
+model Media {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  kind        MediaKind @default(IMAGE)
+  storageKey  String    @unique @map("storage_key")
+  bucket      String
+  mimeType    String    @map("mime_type")
+  sizeBytes   Int       @map("size_bytes")
+  checksum    String
+  /// Null for documents and for images whose dimensions could not be read.
+  width       Int?
+  height      Int?
+  originalFilename String? @map("original_filename")
+  uploadedBy  String?   @map("uploaded_by") @db.Uuid
+
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  productImages ProductImage[]
+  seoImages     SeoMetadata[]
+
+  @@index([checksum])
+  @@index([kind, createdAt])
+  @@map("media")
+}
+
+// ---------------------------------------------------------------------------
+// Catalogue
+// ---------------------------------------------------------------------------
+
+/// Regulatory category. Not cosmetic: a supplement, a cosmetic and a device
+/// carry materially different labelling and claim obligations, and the system
+/// must never flatten them into "product".
+enum ProductType {
+  SUPPLEMENT
+  COSMETIC
+  FOOD
+  DEVICE
+  WELLNESS
+  ACCESSORY
+}
+
+enum ProductStatus {
+  DRAFT
+  IN_REVIEW
+  READY
+  PUBLISHED
+  ARCHIVED
+}
+
+/// Compliance state of a product listing.
+///
+/// Phase 2 implements the gate and a recorded human sign-off. Phase 4 attaches
+/// claims, evidence and review items to it; the states do not change.
+enum ComplianceStatus {
+  NOT_REVIEWED
+  IN_REVIEW
+  APPROVED
+  REJECTED
+  EXPIRED
+}
+
+model Product {
+  id   String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  /// SKUs are never recycled — they appear on orders, invoices and 3PL
+  /// manifests, so reuse would make historical records ambiguous.
+  sku  String @unique
+  /// Unique among live rows only; see the partial index in the
+  /// catalogue_search_and_constraints migration.
+  slug String
+
+  name             String
+  shortDescription String? @map("short_description")
+  longDescription  String? @map("long_description")
+
+  type ProductType
+
+  brand            String?
+  manufacturer     String?
+  /// ISO 3166-1 alpha-2 country of origin.
+  countryOfOrigin  String? @map("country_of_origin")
+
+  status           ProductStatus    @default(DRAFT)
+  complianceStatus ComplianceStatus @default(NOT_REVIEWED) @map("compliance_status")
+  complianceApprovedAt DateTime?    @map("compliance_approved_at") @db.Timestamptz(6)
+  complianceApprovedBy String?      @map("compliance_approved_by") @db.Uuid
+  /// Approvals expire so a listing reviewed years ago does not stay live by
+  /// default. Driven by `compliance.claims_review_interval_days`.
+  complianceReviewDueAt DateTime?   @map("compliance_review_due_at") @db.Timestamptz(6)
+
+  publishedAt DateTime? @map("published_at") @db.Timestamptz(6)
+
+  /// Money is integer minor units. A float price is not an acceptable
+  /// property for anything a customer is charged.
+  priceCents          Int     @map("price_cents")
+  compareAtPriceCents Int?    @map("compare_at_price_cents")
+  costCents           Int?    @map("cost_cents")
+  currency            String  @default("USD")
+
+  taxable  Boolean @default(true)
+  /// Provider-specific tax classification (e.g. a TaxJar or Avalara code).
+  taxCode  String? @map("tax_code")
+
+  weightGrams Int? @map("weight_grams")
+  lengthMm    Int? @map("length_mm")
+  widthMm     Int? @map("width_mm")
+  heightMm    Int? @map("height_mm")
+
+  requiresShipping     Boolean @default(true) @map("requires_shipping")
+  subscriptionEligible Boolean @default(false) @map("subscription_eligible")
+
+  /// Denormalised text (ingredient and category names) folded into the search
+  /// vector. Maintained by the application in the same transaction as the
+  /// relationships it summarises.
+  searchKeywords String? @map("search_keywords")
+
+  /// Stored generated column, maintained by PostgreSQL. Declared here so
+  /// `prisma migrate diff` does not see the database as drifted; the client
+  /// can neither read nor write it, which is correct — it is queried through
+  /// raw SQL in the search provider.
+  searchVector Unsupported("tsvector")? @map("search_vector")
+
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  variants        ProductVariant[]
+  images          ProductImage[]
+  categories      ProductCategory[]
+  ingredients     ProductIngredient[]
+  attributeValues ProductAttributeValue[]
+  warnings        ProductWarning[]
+  disclaimers     ProductDisclaimer[]
+  complianceReviews ComplianceReview[]
+
+  @@index([status, publishedAt])
+  @@index([type, status])
+  @@index([complianceStatus])
+  @@index([brand])
+  @@index([createdAt])
+  @@map("products")
+}
+
+model ProductVariant {
+  id        String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  productId String @map("product_id") @db.Uuid
+
+  sku  String  @unique
+  name String
+  /// Retail barcode (UPC/EAN/GTIN), used by 3PLs and marketplaces.
+  barcode String?
+
+  /// Null means "inherit the product price". Storing a null rather than a copy
+  /// stops a variant silently keeping a stale price after the product changes.
+  priceCents          Int? @map("price_cents")
+  compareAtPriceCents Int? @map("compare_at_price_cents")
+  costCents           Int? @map("cost_cents")
+
+  weightGrams Int? @map("weight_grams")
+
+  /// Option values, e.g. { "size": "60 capsules", "flavour": "unflavoured" }.
+  options Json @default("{}")
+
+  position Int     @default(0)
+  isActive Boolean @default(true) @map("is_active")
+
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  product Product        @relation(fields: [productId], references: [id], onDelete: Cascade)
+  images  ProductImage[]
+
+  @@index([productId, position])
+  @@map("product_variants")
+}
+
+enum ProductImageRole {
+  HERO
+  GALLERY
+  /// The product label. Required before a supplement can be published.
+  LABEL
+  /// Supplement Facts / Nutrition Facts panel.
+  FACTS_PANEL
+  CERTIFICATE
+}
+
+model ProductImage {
+  id        String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  productId String  @map("product_id") @db.Uuid
+  variantId String? @map("variant_id") @db.Uuid
+  mediaId   String  @map("media_id") @db.Uuid
+
+  role     ProductImageRole @default(GALLERY)
+  /// Required. An image with no alternative text is inaccessible, and the
+  /// publishing checklist refuses it.
+  altText  String           @map("alt_text")
+  position Int              @default(0)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  product Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  variant ProductVariant? @relation(fields: [variantId], references: [id], onDelete: SetNull)
+  media   Media           @relation(fields: [mediaId], references: [id], onDelete: Restrict)
+
+  @@index([productId, position])
+  @@index([variantId])
+  @@index([mediaId])
+  @@map("product_images")
+}
+
+model Category {
+  id       String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  parentId String? @map("parent_id") @db.Uuid
+
+  /// Unique among live rows only; see the partial index in the migration.
+  slug        String
+  name        String
+  description String?
+
+  /// Materialised path of ancestor ids, root first. Makes "everything under
+  /// this category" a single indexed query instead of a recursive walk.
+  path     String[] @default([])
+  depth    Int      @default(0)
+  position Int      @default(0)
+
+  isActive Boolean @default(true) @map("is_active")
+
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  parent   Category?         @relation("CategoryTree", fields: [parentId], references: [id], onDelete: Restrict)
+  children Category[]        @relation("CategoryTree")
+  products ProductCategory[]
+
+  @@index([parentId, position])
+  @@index([isActive])
+  @@map("categories")
+}
+
+model ProductCategory {
+  productId  String  @map("product_id") @db.Uuid
+  categoryId String  @map("category_id") @db.Uuid
+  /// Drives breadcrumbs and the canonical URL when a product sits in several
+  /// categories.
+  isPrimary  Boolean @default(false) @map("is_primary")
+  position   Int     @default(0)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  product  Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  category Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@id([productId, categoryId])
+  @@index([categoryId, position])
+  @@map("product_categories")
+}
+
+enum AttributeType {
+  TEXT
+  NUMBER
+  BOOLEAN
+  ENUM
+}
+
+/// Definition of a filterable product attribute (e.g. "form", "vegan",
+/// "servings"). Kept separate from values so the facet list can be built
+/// without scanning every product.
+model ProductAttribute {
+  id       String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  key      String        @unique
+  label    String
+  type     AttributeType @default(TEXT)
+  unit     String?
+  /// Whether this attribute appears as a storefront filter.
+  isFilterable Boolean   @default(false) @map("is_filterable")
+  position Int           @default(0)
+  /// Permitted values when `type` is ENUM.
+  allowedValues String[] @default([]) @map("allowed_values")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  values ProductAttributeValue[]
+
+  @@map("product_attributes")
+}
+
+model ProductAttributeValue {
+  productId   String @map("product_id") @db.Uuid
+  attributeId String @map("attribute_id") @db.Uuid
+
+  /// Canonical string form, used for faceting and equality filters.
+  value       String
+  /// Populated for NUMBER attributes so range filters can use an index.
+  numericValue Decimal? @map("numeric_value") @db.Decimal(14, 4)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  product   Product          @relation(fields: [productId], references: [id], onDelete: Cascade)
+  attribute ProductAttribute @relation(fields: [attributeId], references: [id], onDelete: Cascade)
+
+  @@id([productId, attributeId])
+  @@index([attributeId, value])
+  @@index([attributeId, numericValue])
+  @@map("product_attribute_values")
+}
+
+// ---------------------------------------------------------------------------
+// Ingredients
+// ---------------------------------------------------------------------------
+
+/// An ingredient, reusable across products.
+///
+/// Deliberately a first-class entity rather than free text on a product: a
+/// recall, a supplier change or a newly-identified interaction has to be
+/// answerable as "which products contain this?", and that is only possible if
+/// the relationship is modelled.
+model Ingredient {
+  id             String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  /// Unique among live rows only; see the partial index in the migration.
+  slug           String
+  name           String
+  /// Binomial or INCI name where one exists.
+  scientificName String? @map("scientific_name")
+  commonNames    String[] @default([]) @map("common_names")
+  description    String?
+  /// CAS registry number, where the substance has one.
+  casNumber      String? @map("cas_number")
+
+  /// Major allergen under the US FALCPA/FASTER list, if applicable.
+  allergen       String?
+  isAllergen     Boolean @default(false) @map("is_allergen")
+
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  sources  IngredientSource[]
+  warnings IngredientWarning[]
+  products ProductIngredient[]
+
+  @@index([isAllergen])
+  @@index([name])
+  @@map("ingredients")
+}
+
+enum IngredientSourceType {
+  PLANT
+  ANIMAL
+  MINERAL
+  SYNTHETIC
+  FERMENTATION
+  MICROBIAL
+  OTHER
+}
+
+model IngredientSource {
+  id           String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  ingredientId String               @map("ingredient_id") @db.Uuid
+  type         IngredientSourceType
+  description  String?
+  /// Country the material is sourced from, where known.
+  originCountry String?             @map("origin_country")
+  supplier     String?
+
+  isVegan      Boolean @default(false) @map("is_vegan")
+  isVegetarian Boolean @default(false) @map("is_vegetarian")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  ingredient Ingredient @relation(fields: [ingredientId], references: [id], onDelete: Cascade)
+
+  @@index([ingredientId])
+  @@map("ingredient_sources")
+}
+
+enum WarningSeverity {
+  INFORMATION
+  CAUTION
+  WARNING
+}
+
+enum WarningAudience {
+  GENERAL
+  PREGNANCY
+  NURSING
+  CHILDREN
+  MEDICATION_INTERACTION
+  ALLERGY
+  MEDICAL_CONDITION
+}
+
+/// A warning attached to an ingredient. Inherited by every product containing
+/// it, so adding a warning here surfaces on every affected listing rather than
+/// requiring each one to be edited.
+model IngredientWarning {
+  id           String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  ingredientId String          @map("ingredient_id") @db.Uuid
+  severity     WarningSeverity @default(CAUTION)
+  audience     WarningAudience @default(GENERAL)
+  text         String
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  ingredient Ingredient @relation(fields: [ingredientId], references: [id], onDelete: Cascade)
+
+  @@index([ingredientId, severity])
+  @@map("ingredient_warnings")
+}
+
+model ProductIngredient {
+  productId    String @map("product_id") @db.Uuid
+  ingredientId String @map("ingredient_id") @db.Uuid
+
+  /// Amount per serving, in `unit`. Null where the formulation does not
+  /// disclose it (a proprietary blend), which is itself worth showing.
+  amount Decimal? @db.Decimal(14, 4)
+  unit   String?
+  /// Percent Daily Value, where one is established.
+  dailyValuePercent Decimal? @map("daily_value_percent") @db.Decimal(6, 2)
+
+  /// Active ingredients appear in the Supplement Facts panel; others are
+  /// excipients listed separately.
+  isActive Boolean @default(true) @map("is_active")
+  position Int     @default(0)
+  notes    String?
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  product    Product    @relation(fields: [productId], references: [id], onDelete: Cascade)
+  ingredient Ingredient @relation(fields: [ingredientId], references: [id], onDelete: Restrict)
+
+  @@id([productId, ingredientId])
+  @@index([ingredientId])
+  @@map("product_ingredients")
+}
+
+// ---------------------------------------------------------------------------
+// Product safety copy
+// ---------------------------------------------------------------------------
+
+/// A warning written specifically for this product, over and above those
+/// inherited from its ingredients.
+model ProductWarning {
+  id        String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  productId String          @map("product_id") @db.Uuid
+  severity  WarningSeverity @default(WARNING)
+  audience  WarningAudience @default(GENERAL)
+  text      String
+  position  Int             @default(0)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId, position])
+  @@map("product_warnings")
+}
+
+enum DisclaimerKind {
+  /// DSHEA statement required on dietary supplement listings.
+  DSHEA
+  /// "Not medical advice", "consult your clinician" and similar.
+  GENERAL_HEALTH
+  ALLERGEN
+  OTHER
+}
+
+/// Required legal text on a listing. Held as rows rather than hard-coded so
+/// counsel can change the wording without a deploy, and so the publishing
+/// checklist can verify the required ones are present.
+model ProductDisclaimer {
+  id        String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  productId String         @map("product_id") @db.Uuid
+  kind      DisclaimerKind
+  text      String
+  position  Int            @default(0)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, kind])
+  @@index([productId, position])
+  @@map("product_disclaimers")
+}
+
+// ---------------------------------------------------------------------------
+// Compliance review (expanded in Phase 4)
+// ---------------------------------------------------------------------------
+
+enum ComplianceDecision {
+  APPROVED
+  REJECTED
+  CHANGES_REQUESTED
+}
+
+/// A recorded human sign-off on a product listing.
+///
+/// Append-only, like the audit log: the credibility of a compliance decision
+/// depends entirely on it not having been editable afterwards. Phase 4 adds
+/// claims, evidence and per-item review to this; the decision record does not
+/// change shape.
+model ComplianceReview {
+  id        String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  productId String             @map("product_id") @db.Uuid
+  decision  ComplianceDecision
+  /// Required. A decision without reasoning is not a review.
+  notes     String
+
+  reviewerId    String   @map("reviewer_id") @db.Uuid
+  reviewerLabel String   @map("reviewer_label")
+  decidedAt     DateTime @default(now()) @map("decided_at") @db.Timestamptz(6)
+  /// When this approval lapses and the listing must be re-reviewed.
+  reviewDueAt   DateTime? @map("review_due_at") @db.Timestamptz(6)
+
+  /// Snapshot of the publishing checklist at the moment of the decision, so it
+  /// is possible to say what the reviewer actually saw.
+  checklistSnapshot Json? @map("checklist_snapshot")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId, decidedAt])
+  @@index([decision, decidedAt])
+  @@map("compliance_reviews")
+}
+
+// ---------------------------------------------------------------------------
+// Content and SEO
+// ---------------------------------------------------------------------------
+
+enum PageStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+/// A CMS page.
+///
+/// Body is stored as structured blocks rather than raw HTML: rendering a block
+/// list cannot inject script, whereas storing HTML written in an admin form
+/// eventually will.
+model Page {
+  id     String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  /// Unique among live rows only; see the partial index in the migration.
+  slug   String
+  title  String
+  status PageStatus @default(DRAFT)
+
+  /// Array of typed blocks. See packages/validation/src/content.ts.
+  blocks Json @default("[]")
+
+  /// Draft content held separately, so editing a live page does not change
+  /// what visitors see until it is published.
+  draftBlocks Json? @map("draft_blocks")
+  draftTitle  String? @map("draft_title")
+
+  publishedAt   DateTime? @map("published_at") @db.Timestamptz(6)
+  publishedBy   String?   @map("published_by") @db.Uuid
+  lastEditedBy  String?   @map("last_edited_by") @db.Uuid
+
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  @@index([status, publishedAt])
+  @@map("pages")
+}
+
+enum SeoEntityType {
+  PRODUCT
+  CATEGORY
+  PAGE
+  INGREDIENT
+}
+
+/// SEO metadata for any entity that has a public URL.
+///
+/// Polymorphic by (entityType, entityId) rather than a column per domain, so a
+/// new public entity type needs no schema change.
+model SeoMetadata {
+  id         String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  entityType SeoEntityType @map("entity_type")
+  entityId   String        @map("entity_id") @db.Uuid
+
+  title           String?
+  description     String?
+  canonicalUrl    String? @map("canonical_url")
+  ogTitle         String? @map("og_title")
+  ogDescription   String? @map("og_description")
+  ogImageMediaId  String? @map("og_image_media_id") @db.Uuid
+  /// Excludes the page from the sitemap and emits a noindex robots directive.
+  noindex         Boolean @default(false)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  ogImage Media? @relation(fields: [ogImageMediaId], references: [id], onDelete: SetNull)
+
+  @@unique([entityType, entityId])
+  @@index([ogImageMediaId])
+  @@map("seo_metadata")
+}

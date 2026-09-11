@@ -29,6 +29,8 @@ const productionBase = {
   PAYMENT_WEBHOOK_SECRET: 'whsec_example',
   EMAIL_PROVIDER: 'ses',
   FULFILLMENT_PROVIDER: 'shipbob',
+  STORAGE_PROVIDER: 's3',
+  S3_BUCKET: 'health-commerce-media',
 };
 
 /** Each case must be REFUSED by the environment contract. */
@@ -43,6 +45,8 @@ const mustBeRejected = [
   ['a short signing key', { SESSION_SECRET: Buffer.alloc(16).toString('base64') }],
   ['a short encryption key', { ENCRYPTION_KEY: Buffer.alloc(8).toString('hex') }],
   ['a payment provider with no webhook secret', { PAYMENT_WEBHOOK_SECRET: undefined }],
+  ['the filesystem storage provider', { STORAGE_PROVIDER: 'filesystem' }],
+  ['S3 storage with no bucket', { S3_BUCKET: undefined }],
 ];
 
 let failures = 0;

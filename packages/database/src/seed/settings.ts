@@ -62,6 +62,32 @@ export const BASELINE_SETTINGS: SettingSeed[] = [
       'DSHEA disclaimer applied to dietary supplement listings. Wording must be reviewed by counsel before launch.',
   },
   {
+    key: 'compliance.disclaimer_general_health',
+    value:
+      'This information is provided for general educational purposes and is not medical advice. Talk to a qualified healthcare professional before starting any supplement, particularly if you are pregnant, nursing, taking medication or managing a health condition.',
+    valueType: 'STRING',
+    description:
+      'General health disclaimer required on every listing by the publishing checklist. Wording must be reviewed by counsel before launch.',
+  },
+  {
+    key: 'catalog.publish_checklist',
+    value: [
+      'PRODUCT_INFORMATION',
+      'PRICING',
+      'IMAGES',
+      'LABEL',
+      'INGREDIENTS',
+      'WARNINGS',
+      'DISCLAIMERS',
+      'SEO',
+      'CATEGORY',
+      'COMPLIANCE_APPROVED',
+    ],
+    valueType: 'JSON',
+    description:
+      'Checks that must pass before a product can be published. Removing a key does not stop the check being evaluated \u2014 the finding is still reported \u2014 it stops the finding from blocking publication. Which checks are legally required is a question for counsel, not a default.',
+  },
+  {
     key: 'compliance.claims_review_interval_days',
     value: 365,
     valueType: 'NUMBER',

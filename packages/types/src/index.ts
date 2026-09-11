@@ -4,3 +4,6 @@ export * from './errors.js';
 export * from './pagination.js';
 export * from './auth.js';
 export * from './events.js';
+export * from './catalogue.js';
+export * from './publishing.js';
+export * from './audit.js';

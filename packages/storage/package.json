@@ -1,0 +1,36 @@
+{
+  "name": "@health/storage",
+  "version": "0.1.0",
+  "private": true,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint src",
+    "test": "vitest run",
+    "test:unit": "vitest run src/keys.spec.ts src/filesystem-provider.spec.ts",
+    "test:integration": "vitest run src/s3-provider.spec.ts",
+    "clean": "rm -rf dist .turbo"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "3.717.0",
+    "@aws-sdk/s3-request-presigner": "3.717.0",
+    "@health/config": "workspace:*",
+    "sharp": "0.33.5"
+  },
+  "devDependencies": {
+    "s3rver": "3.7.1",
+    "typescript": "5.7.3",
+    "vitest": "2.1.8"
+  }
+}

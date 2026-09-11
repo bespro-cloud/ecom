@@ -1,3 +1,7 @@
+import { loadTestEnv } from './load-env.js';
+
+loadTestEnv();
+
 /**
  * Per-suite defaults.
  *

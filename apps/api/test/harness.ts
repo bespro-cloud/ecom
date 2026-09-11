@@ -1,11 +1,11 @@
 import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import type { App } from 'supertest/types';
-import { generateTotpCode } from '@health/auth';
+import { generateTotpCode, hashPassword, PASSWORD_ALGORITHM_ID } from '@health/auth';
 import { createApp } from '../src/bootstrap.js';
 import { PrismaService } from '../src/infrastructure/prisma/prisma.service.js';
 import { RedisService } from '../src/infrastructure/redis/redis.service.js';
-import { syncRbac } from '@health/database';
+import { seedSettings, syncRbac } from '@health/database';
 
 export interface TestHarness {
   app: INestApplication;
@@ -17,6 +17,25 @@ export interface TestHarness {
 }
 
 const TRUNCATABLE = [
+  // Catalogue first: everything below it is referenced by these rows.
+  'compliance_reviews',
+  'product_disclaimers',
+  'product_warnings',
+  'product_ingredients',
+  'product_attribute_values',
+  'product_categories',
+  'product_images',
+  'product_variants',
+  'products',
+  'categories',
+  'product_attributes',
+  'ingredient_warnings',
+  'ingredient_sources',
+  'ingredients',
+  'seo_metadata',
+  'pages',
+  'media',
+
   'audit_logs',
   'customer_consents',
   'customer_addresses',
@@ -31,6 +50,9 @@ const TRUNCATABLE = [
   'webhook_events',
 ];
 
+/** Tables a database trigger makes append-only. */
+const APPEND_ONLY = ['audit_logs', 'customer_consents', 'compliance_reviews'];
+
 export async function createHarness(): Promise<TestHarness> {
   const app = await createApp();
   await app.init();
@@ -43,15 +65,21 @@ export async function createHarness(): Promise<TestHarness> {
   await seedBaselineSettings(prisma);
 
   const reset = async (): Promise<void> => {
-    await prisma.$executeRawUnsafe('ALTER TABLE "audit_logs" DISABLE TRIGGER USER');
-    await prisma.$executeRawUnsafe('ALTER TABLE "customer_consents" DISABLE TRIGGER USER');
+    // These three are append-only, enforced by a trigger. Tests are the one
+    // place that is allowed to clear them, and only by disabling the trigger
+    // explicitly — which is exactly the noise we want if it ever appears
+    // outside this file.
+    for (const table of APPEND_ONLY) {
+      await prisma.$executeRawUnsafe(`ALTER TABLE "${table}" DISABLE TRIGGER USER`);
+    }
     try {
       await prisma.$executeRawUnsafe(
         `TRUNCATE TABLE ${TRUNCATABLE.map((t) => `"${t}"`).join(', ')} RESTART IDENTITY CASCADE`,
       );
     } finally {
-      await prisma.$executeRawUnsafe('ALTER TABLE "audit_logs" ENABLE TRIGGER USER');
-      await prisma.$executeRawUnsafe('ALTER TABLE "customer_consents" ENABLE TRIGGER USER');
+      for (const table of APPEND_ONLY) {
+        await prisma.$executeRawUnsafe(`ALTER TABLE "${table}" ENABLE TRIGGER USER`);
+      }
     }
     // Rate-limit counters and single-use MFA nonces live in Redis; leaving them
     // behind would make tests order-dependent.
@@ -71,17 +99,16 @@ export async function createHarness(): Promise<TestHarness> {
   };
 }
 
+/**
+ * The settings the application actually ships with, not a test-shaped subset.
+ *
+ * Several of them are load-bearing — the publishing checklist reads
+ * `catalog.publish_checklist`, and product creation reads the disclaimer text
+ * — so seeding a reduced fixture here would mean testing a configuration no
+ * deployment ever runs.
+ */
 async function seedBaselineSettings(prisma: PrismaService): Promise<void> {
-  await prisma.systemSetting.upsert({
-    where: { key: 'security.staff_mfa_grace_period_days' },
-    update: {},
-    create: {
-      key: 'security.staff_mfa_grace_period_days',
-      value: 7,
-      valueType: 'NUMBER',
-      description: 'Test fixture.',
-    },
-  });
+  await seedSettings(prisma);
 }
 
 /**
@@ -99,3 +126,77 @@ export function nextTotpCode(secret: string, offsetPeriods = 1): string {
 }
 
 export const STRONG_PASSWORD = 'salted caramel harbour lantern';
+
+export interface SignedInStaff {
+  userId: string;
+  email: string;
+  token: string;
+  /** Present only for roles that require MFA. */
+  totpSecret?: string;
+}
+
+/**
+ * Creates a staff account with the given role and signs it in *completely* —
+ * including MFA where the role requires it, which is the only way such a
+ * session becomes privileged enough to do anything interesting.
+ */
+export async function signedInStaff(
+  harness: TestHarness,
+  roleKey: string,
+  email = `${roleKey.toLowerCase()}@example.test`,
+): Promise<SignedInStaff> {
+  const role = await harness.prisma.role.findUniqueOrThrow({ where: { key: roleKey } });
+  const user = await harness.prisma.user.create({
+    data: {
+      email,
+      emailNormalized: email.toLowerCase(),
+      passwordHash: await hashPassword(STRONG_PASSWORD),
+      passwordAlgorithm: PASSWORD_ALGORITHM_ID,
+      passwordUpdatedAt: new Date(),
+      firstName: 'Test',
+      lastName: 'Staff',
+      type: 'STAFF',
+      status: 'ACTIVE',
+      emailVerifiedAt: new Date(),
+      roles: { create: { roleId: role.id } },
+    },
+  });
+
+  const initial = await harness
+    .http()
+    .post('/api/v1/auth/login')
+    .send({ email, password: STRONG_PASSWORD });
+
+  if (!role.requiresMfa) {
+    return { userId: user.id, email, token: initial.body.accessToken as string };
+  }
+
+  const enroll = await harness
+    .http()
+    .post('/api/v1/auth/mfa/enroll')
+    .set('Authorization', `Bearer ${initial.body.accessToken}`);
+  await harness
+    .http()
+    .post('/api/v1/auth/mfa/enroll/confirm')
+    .set('Authorization', `Bearer ${initial.body.accessToken}`)
+    .send({ factorId: enroll.body.factorId, code: nextTotpCode(enroll.body.secret, 0) });
+
+  const challenge = await harness
+    .http()
+    .post('/api/v1/auth/login')
+    .send({ email, password: STRONG_PASSWORD });
+  const verified = await harness
+    .http()
+    .post('/api/v1/auth/mfa/verify')
+    .send({
+      challengeToken: challenge.body.challengeToken,
+      code: nextTotpCode(enroll.body.secret, 1),
+    });
+
+  return {
+    userId: user.id,
+    email,
+    token: verified.body.accessToken as string,
+    totpSecret: enroll.body.secret as string,
+  };
+}

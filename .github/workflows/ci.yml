@@ -33,6 +33,23 @@ jobs:
     name: Lint, format and typecheck
     runs-on: ubuntu-latest
     timeout-minutes: 15
+
+    services:
+      # `prisma migrate diff` rebuilds the migration history into a scratch
+      # database to compare it against the schema.
+      postgres:
+        image: postgres:16.6-alpine
+        env:
+          POSTGRES_USER: healthcommerce
+          POSTGRES_PASSWORD: healthcommerce
+          POSTGRES_DB: health_commerce_shadow
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U healthcommerce"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
     steps:
       - uses: actions/checkout@v4
 
@@ -63,19 +80,11 @@ jobs:
         run: pnpm run typecheck
 
       - name: Verify the Prisma schema and migrations agree
-        # Catches a schema edited without a matching migration, which would
-        # otherwise only surface at deploy time.
         run: |
           pnpm exec prisma validate --schema prisma/schema.prisma
-          pnpm exec prisma migrate diff \
-            --from-migrations prisma/migrations \
-            --to-schema-datamodel prisma/schema.prisma \
-            --shadow-database-url "postgresql://postgres:postgres@localhost:5432/shadow" \
-            --exit-code || \
-            (echo '::error::The Prisma schema has changes with no migration. Run `pnpm db:migrate`.' && exit 1)
+          node scripts/check-schema-drift.mjs
         env:
-          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/shadow
-        continue-on-error: true
+          SHADOW_DATABASE_URL: postgresql://healthcommerce:healthcommerce@localhost:5432/health_commerce_shadow
 
   # ---------------------------------------------------------------------------
   unit:

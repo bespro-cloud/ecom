@@ -1,4 +1,5 @@
 import { execSync } from 'node:child_process';
+import { loadTestEnv } from './load-env';
 
 /**
  * Applies migrations to the integration-test database once per run.
@@ -7,6 +8,8 @@ import { execSync } from 'node:child_process';
  * so the schema has to actually be there.
  */
 export default function globalSetup(): void {
+  loadTestEnv();
+
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) {
     throw new Error('DATABASE_URL must be set for integration tests.');

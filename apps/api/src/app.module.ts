@@ -13,6 +13,11 @@ import { AuthModule } from './modules/auth/auth.module.js';
 import { UsersModule } from './modules/users/users.module.js';
 import { CustomersModule } from './modules/customers/customers.module.js';
 import { SettingsModule } from './modules/settings/settings.module.js';
+import { StorageModule } from './modules/media/storage.provider.js';
+import { MediaModule } from './modules/media/media.module.js';
+import { CatalogueModule } from './modules/catalogue/catalogue.module.js';
+import { ContentModule } from './modules/content/content.module.js';
+import { ComplianceModule } from './modules/compliance/compliance.module.js';
 import { HealthModule } from './modules/health/health.module.js';
 import { CorrelationIdMiddleware } from './common/middleware/correlation-id.middleware.js';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter.js';
@@ -48,6 +53,11 @@ import { RateLimitGuard } from './common/guards/rate-limit.guard.js';
     UsersModule,
     CustomersModule,
     SettingsModule,
+    StorageModule,
+    MediaModule,
+    CatalogueModule,
+    ContentModule,
+    ComplianceModule,
     HealthModule,
   ],
   providers: [

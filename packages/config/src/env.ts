@@ -109,6 +109,18 @@ export const serverEnvSchema = z
     DEFAULT_COUNTRY: z.string().length(2).default('US'),
     DEFAULT_TIMEZONE: z.string().default('America/New_York'),
 
+    // `filesystem` is a development convenience and is refused in production.
+    STORAGE_PROVIDER: z.enum(['filesystem', 's3']).default('filesystem'),
+    STORAGE_FILESYSTEM_ROOT: z.string().default('./data/media'),
+    /** CDN origin for public media. Falls back to the storage provider's own URL. */
+    MEDIA_PUBLIC_BASE_URL: z.string().url().optional(),
+    MEDIA_MAX_UPLOAD_BYTES: z.coerce
+      .number()
+      .int()
+      .positive()
+      .default(15 * 1024 * 1024),
+    MEDIA_SIGNED_URL_TTL_SECONDS: durationSeconds.default(300),
+
     S3_ENDPOINT: z.string().url().optional(),
     S3_REGION: z.string().default('us-east-1'),
     S3_BUCKET: z.string().optional(),
@@ -202,6 +214,23 @@ export const serverEnvSchema = z
         code: z.ZodIssueCode.custom,
         path: ['EMAIL_PROVIDER'],
         message: 'the console email provider must never run in production',
+      });
+    }
+    if (env.STORAGE_PROVIDER === 'filesystem') {
+      // Local disk does not survive a container restart, is not shared between
+      // instances, and is not backed up. Customer-visible media must not live
+      // there.
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['STORAGE_PROVIDER'],
+        message: 'the filesystem storage provider must never run in production',
+      });
+    }
+    if (env.STORAGE_PROVIDER === 's3' && !env.S3_BUCKET) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['S3_BUCKET'],
+        message: 'required when the S3 storage provider is configured',
       });
     }
   });
