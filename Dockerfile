@@ -21,7 +21,12 @@ ENV PATH="$PNPM_HOME:$PATH"
 RUN apt-get update \
  && apt-get install -y --no-install-recommends openssl ca-certificates dumb-init \
  && rm -rf /var/lib/apt/lists/*
-RUN corepack enable
+# The corepack bundled with node:22.13 carries a snapshot of the npm registry's
+# signing keys, and those keys have since rotated — it then rejects the
+# signature on its own pnpm download and dies with "Cannot find matching
+# keyid". Installing a current corepack picks up the new key set. Which pnpm is
+# used stays pinned by the root package.json's packageManager field.
+RUN npm install --global corepack@latest && corepack enable
 
 # --- dependencies ----------------------------------------------------------
 FROM base AS deps

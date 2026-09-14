@@ -19,7 +19,9 @@ ENV PATH="$PNPM_HOME:$PATH"
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates dumb-init \
  && rm -rf /var/lib/apt/lists/*
-RUN corepack enable
+# See the root Dockerfile: node:22.13's bundled corepack has stale npm registry
+# signing keys and rejects its own pnpm download.
+RUN npm install --global corepack@latest && corepack enable
 
 FROM base AS deps
 WORKDIR /app
