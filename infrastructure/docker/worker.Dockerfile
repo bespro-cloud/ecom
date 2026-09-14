@@ -23,6 +23,9 @@ RUN npm install --global corepack@latest && corepack enable
 # --- dependencies ----------------------------------------------------------
 FROM base AS deps
 WORKDIR /app
+# See the root Dockerfile: pnpm aborts a modules purge when no terminal is
+# attached. Kept off the runtime layer deliberately.
+ENV CI=true
 COPY pnpm-workspace.yaml package.json pnpm-lock.yaml .npmrc ./
 
 # Every workspace manifest — see the note in the root Dockerfile. A package

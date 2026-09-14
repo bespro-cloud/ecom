@@ -31,6 +31,12 @@ RUN npm install --global corepack@latest && corepack enable
 # --- dependencies ----------------------------------------------------------
 FROM base AS deps
 WORKDIR /app
+# pnpm asks before purging a modules directory and aborts when no terminal is
+# attached, which is every container build (ERR_PNPM_ABORTED_REMOVE_MODULES_-
+# DIR_NO_TTY). Set on deps rather than base so it is inherited by the build
+# stage but never reaches the runtime layer — CI=true changes how some
+# libraries behave, and the shipped container is not a CI environment.
+ENV CI=true
 COPY pnpm-workspace.yaml package.json pnpm-lock.yaml .npmrc ./
 
 # Every workspace manifest, because `--frozen-lockfile` compares the lockfile
