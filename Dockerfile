@@ -9,8 +9,8 @@
 # images stay under infrastructure/docker/ — they are always built with an
 # explicit -f.
 #
-# Multi-stage: the toolchain, sources and dev dependencies stay in the builder;
-# the runtime layer carries only what is needed to run. The result runs as an
+# Multi-stage: the toolchain and the sources stay in the builder; the runtime
+# layer carries the compiled output and the installed modules, and runs as an
 # unprivileged user with no shell-accessible build tooling.
 # ---------------------------------------------------------------------------
 
@@ -73,8 +73,18 @@ COPY . .
 RUN pnpm --filter @health/database run generate \
  && pnpm --filter "./packages/*" run build \
  && pnpm --filter @health/api run build
-# Drop dev dependencies before they are copied into the runtime layer.
-RUN pnpm prune --prod
+
+# There is deliberately no `pnpm prune --prod` here. It is not npm's prune: run
+# at a workspace root it resolves against the root manifest, and this root
+# declares only devDependencies — the real dependency graph lives in apps/* and
+# packages/*. Pruning against it strips the runtime modules and the container
+# dies on its first require.
+#
+# The cost is that this image carries the build toolchain's dependencies as
+# well as the application's, so it is larger and holds more code than it needs
+# to. The proper fix is `pnpm deploy --filter @health/api --prod`, which
+# assembles exactly one package and its production dependencies; it needs
+# testing against pnpm 10's isolated node-linker before it can be trusted here.
 
 # --- runtime ---------------------------------------------------------------
 FROM base AS runtime

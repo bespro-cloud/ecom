@@ -54,8 +54,10 @@ COPY . .
 RUN pnpm --filter @health/database run generate \
  && pnpm --filter "./packages/*" run build \
  && pnpm --filter @health/worker run build
-# Drop dev dependencies before they are copied into the runtime layer.
-RUN pnpm prune --prod
+
+# No `pnpm prune --prod` — see the note in the root Dockerfile. At a workspace
+# root it prunes against a manifest that declares no dependencies and takes the
+# runtime modules with it.
 
 # --- runtime ---------------------------------------------------------------
 FROM base AS runtime
