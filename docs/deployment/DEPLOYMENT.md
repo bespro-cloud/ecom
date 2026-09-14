@@ -1,5 +1,18 @@
 # Deployment
 
+Two topologies are supported. This document describes the first:
+docker-compose on a VPS behind nginx, which is what `infrastructure/`,
+`scripts/deploy.sh`, `scripts/backup.sh` and the monitoring stack are built
+for.
+
+The second is Render's managed Postgres and Key Value with the four
+applications as separate services — see [RENDER.md](RENDER.md) and the
+`render.yaml` blueprint at the repository root. Several scripts here assume
+`docker compose exec` and need rewriting before they work there; RENDER.md says
+which.
+
+Pick one per environment and do not mix them.
+
 ## Local development
 
 ```sh

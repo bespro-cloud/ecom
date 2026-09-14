@@ -1,0 +1,352 @@
+# Render Blueprint — Health Commerce
+#
+# The repository's original deployment model is docker-compose on a VPS behind
+# nginx (see docs/deployment/DEPLOYMENT.md). This blueprint is the second
+# supported topology: Render's managed Postgres and Key Value, with the four
+# applications as separate services. Both are maintained; pick one per
+# environment and do not mix them.
+#
+# ---------------------------------------------------------------------------
+# THIS BLUEPRINT WILL NOT BOOT UNTIL THE SECRETS BELOW ARE SET.
+#
+# Every `sync: false` entry is a value Render asks you for when the blueprint
+# is applied. That is deliberate: none of them may live in git, and several of
+# them the application refuses to start without. With NODE_ENV=production the
+# environment contract exits 78 (EX_CONFIG) rather than run on a mock payment
+# provider, a console email provider, local-disk storage, an http:// public
+# URL, a wildcard CORS list, or key material under 32 bytes.
+#
+# A crash loop here is the guard rails working, not a misconfiguration to route
+# around. docs/deployment/RENDER.md lists what each secret is and where to get
+# it.
+# ---------------------------------------------------------------------------
+#
+# Region: a US region, not the workspace's existing Singapore default. This
+# platform sells regulated health products to US customers, and where customer
+# records physically sit is a question to answer deliberately rather than
+# inherit from whichever region happened to be selected last. Change it only
+# with that in mind, and change it in all six places — cross-region traffic
+# does not use the private network.
+
+databases:
+  - name: health-commerce-db
+    databaseName: health_commerce
+    user: healthcommerce
+    region: oregon
+    # Not `free`: the free tier is deleted after 30 days and has no
+    # point-in-time recovery, which makes the disaster-recovery plan fiction.
+    plan: standard
+    postgresMajorVersion: '16'
+    # Empty list = reachable only from services on the private network. The
+    # database must never be addressable from the internet.
+    ipAllowList: []
+
+services:
+  # ---------------------------------------------------------------------------
+  # Key Value (Redis): sessions' rate-limit counters and the BullMQ queues.
+  # ---------------------------------------------------------------------------
+  - type: keyvalue
+    name: health-commerce-kv
+    region: oregon
+    plan: standard
+    ipAllowList: []
+    # BullMQ requires noeviction. Under any eviction policy Redis silently
+    # discards keys when memory fills — which here means dropping queued jobs:
+    # order confirmation emails, outbox dispatch, subscription billing. A queue
+    # that loses work under load without erroring is worse than one that stops.
+    maxmemoryPolicy: noeviction
+
+  # ---------------------------------------------------------------------------
+  # API — the domain. Everything else talks to this.
+  # ---------------------------------------------------------------------------
+  - type: web
+    name: health-commerce-api
+    runtime: node
+    region: oregon
+    plan: standard
+    branch: main
+    healthCheckPath: /health/ready
+    buildCommand: >-
+      corepack enable &&
+      pnpm install --frozen-lockfile &&
+      pnpm --filter @health/database run generate &&
+      pnpm --filter "./packages/*" run build &&
+      pnpm --filter @health/api run build
+    # Migrations run once per deploy, before any instance is replaced, rather
+    # than on every container start where concurrent instances would race for
+    # the same advisory lock. Requires a paid instance type; on a plan without
+    # pre-deploy commands, run `pnpm run db:migrate:deploy` from a one-off job
+    # and never from startCommand.
+    preDeployCommand: pnpm --filter @health/database run migrate:deploy
+    startCommand: pnpm --filter @health/api run start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: APP_NAME
+        value: health-commerce
+      # The application binds API_PORT, not Render's PORT. 10000 is the port
+      # Render probes by default; if you change one, change both.
+      - key: API_PORT
+        value: 10000
+      - key: LOG_LEVEL
+        value: info
+      - key: LOG_PRETTY
+        value: false
+
+      - key: DATABASE_URL
+        fromDatabase:
+          name: health-commerce-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: health-commerce-kv
+          type: keyvalue
+          property: connectionString
+
+      # --- Public addresses -------------------------------------------------
+      # Not known until the services exist and any custom domains are attached,
+      # so Render asks. All three must be https:// or the API refuses to boot,
+      # and CORS_ALLOWED_ORIGINS must name the storefront and admin origins
+      # explicitly — a wildcard is refused.
+      - key: API_PUBLIC_URL
+        sync: false
+      - key: STOREFRONT_PUBLIC_URL
+        sync: false
+      - key: ADMIN_PUBLIC_URL
+        sync: false
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false
+      - key: COOKIE_SECURE
+        value: true
+
+      # --- Key material -----------------------------------------------------
+      # Generate each with `openssl rand -base64 32`. Must decode to at least
+      # 32 bytes. ENCRYPTION_KEY protects TOTP secrets at rest: rotating it
+      # without a re-encryption pass locks every staff member out of MFA, so
+      # treat it as permanent until there is a rotation runbook entry.
+      - key: SESSION_SECRET
+        sync: false
+      - key: ENCRYPTION_KEY
+        sync: false
+
+      # --- Payments ---------------------------------------------------------
+      # `mock` is refused in production. The webhook secret is not optional
+      # either: without it the API cannot verify that a "payment succeeded"
+      # callback actually came from the provider, and an unverified webhook is
+      # an unauthenticated endpoint that marks orders paid.
+      - key: PAYMENT_PROVIDER
+        value: stripe
+      - key: PAYMENT_SECRET_KEY
+        sync: false
+      - key: PAYMENT_WEBHOOK_SECRET
+        sync: false
+
+      # --- Email ------------------------------------------------------------
+      # `console` is refused in production. Without a real provider, order
+      # confirmations, password resets and email verification silently go
+      # nowhere.
+      - key: EMAIL_PROVIDER
+        value: resend
+      - key: EMAIL_API_KEY
+        sync: false
+      - key: EMAIL_FROM
+        sync: false
+
+      # --- Media storage ----------------------------------------------------
+      # `filesystem` is refused in production: a Render instance's disk does not
+      # survive a restart, is not shared between instances and is not backed up.
+      - key: STORAGE_PROVIDER
+        value: s3
+      - key: S3_BUCKET
+        sync: false
+      - key: S3_REGION
+        sync: false
+      - key: S3_ACCESS_KEY
+        sync: false
+      - key: S3_SECRET_KEY
+        sync: false
+      - key: S3_FORCE_PATH_STYLE
+        value: false
+      - key: MEDIA_PUBLIC_BASE_URL
+        sync: false
+
+      # --- Fulfilment -------------------------------------------------------
+      # `mock` is refused in production. Set to `shipbob` and supply the
+      # credentials when a 3PL contract exists.
+      - key: FULFILLMENT_PROVIDER
+        value: shipbob
+      - key: THREEPL_API_KEY
+        sync: false
+      - key: THREEPL_API_SECRET
+        sync: false
+
+      # --- AI ---------------------------------------------------------------
+      # `disabled` is a fully supported production configuration and the right
+      # default for a first launch — the platform works without it. To enable,
+      # set anthropic, supply AI_API_KEY, and set a non-zero daily budget; an
+      # enabled provider with no ceiling is refused at boot.
+      - key: AI_PROVIDER
+        value: disabled
+      - key: AI_DAILY_BUDGET_MICROS
+        value: 0
+
+      # --- Observability ----------------------------------------------------
+      - key: SENTRY_DSN
+        sync: false
+      - key: METRICS_ENABLED
+        value: true
+
+  # ---------------------------------------------------------------------------
+  # Worker — outbox dispatch, queues, scheduled jobs.
+  #
+  # Separate from the API on purpose: a long job must not compete with a
+  # customer request for the same event loop, and the two scale on different
+  # signals. It runs no migrations — the API's pre-deploy step owns the schema,
+  # and two services racing to migrate is how you get a half-applied deploy.
+  # ---------------------------------------------------------------------------
+  - type: worker
+    name: health-commerce-worker
+    runtime: node
+    region: oregon
+    plan: standard
+    branch: main
+    buildCommand: >-
+      corepack enable &&
+      pnpm install --frozen-lockfile &&
+      pnpm --filter @health/database run generate &&
+      pnpm --filter "./packages/*" run build &&
+      pnpm --filter @health/worker run build
+    startCommand: pnpm --filter @health/worker run start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: WORKER_PORT
+        value: 10000
+      - key: LOG_LEVEL
+        value: info
+      - key: DATABASE_URL
+        fromDatabase:
+          name: health-commerce-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: health-commerce-kv
+          type: keyvalue
+          property: connectionString
+      # The worker parses the same environment contract as the API, so it needs
+      # the same values — including the provider credentials, because it is the
+      # process that actually sends the email and calls the 3PL.
+      - key: API_PUBLIC_URL
+        sync: false
+      - key: STOREFRONT_PUBLIC_URL
+        sync: false
+      - key: ADMIN_PUBLIC_URL
+        sync: false
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false
+      - key: COOKIE_SECURE
+        value: true
+      - key: SESSION_SECRET
+        sync: false
+      - key: ENCRYPTION_KEY
+        sync: false
+      - key: PAYMENT_PROVIDER
+        value: stripe
+      - key: PAYMENT_SECRET_KEY
+        sync: false
+      - key: PAYMENT_WEBHOOK_SECRET
+        sync: false
+      - key: EMAIL_PROVIDER
+        value: resend
+      - key: EMAIL_API_KEY
+        sync: false
+      - key: EMAIL_FROM
+        sync: false
+      - key: STORAGE_PROVIDER
+        value: s3
+      - key: S3_BUCKET
+        sync: false
+      - key: S3_REGION
+        sync: false
+      - key: S3_ACCESS_KEY
+        sync: false
+      - key: S3_SECRET_KEY
+        sync: false
+      - key: S3_FORCE_PATH_STYLE
+        value: false
+      - key: FULFILLMENT_PROVIDER
+        value: shipbob
+      - key: THREEPL_API_KEY
+        sync: false
+      - key: THREEPL_API_SECRET
+        sync: false
+      - key: AI_PROVIDER
+        value: disabled
+      - key: AI_DAILY_BUDGET_MICROS
+        value: 0
+      - key: SENTRY_DSN
+        sync: false
+
+  # ---------------------------------------------------------------------------
+  # Storefront — customer-facing Next.js.
+  # ---------------------------------------------------------------------------
+  - type: web
+    name: health-commerce-storefront
+    runtime: node
+    region: oregon
+    plan: standard
+    branch: main
+    buildCommand: >-
+      corepack enable &&
+      pnpm install --frozen-lockfile &&
+      pnpm --filter @health/database run generate &&
+      pnpm --filter "./packages/*" run build &&
+      pnpm --filter @health/storefront run build
+    # The package script pins -p 3000; Render needs the service on $PORT.
+    startCommand: pnpm --filter @health/storefront exec next start -p $PORT
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # Where the Next.js server reaches the API. Set after the first deploy,
+      # once the API's address is known.
+      - key: API_INTERNAL_URL
+        sync: false
+      - key: NEXT_PUBLIC_SITE_URL
+        sync: false
+      - key: NEXT_PUBLIC_SITE_NAME
+        value: Health Commerce
+      # Indexing stays off unless this is explicitly "true", so a staging copy
+      # cannot quietly get itself indexed as a second storefront selling
+      # regulated products. Turn it on for the real launch only.
+      - key: NEXT_PUBLIC_ALLOW_INDEXING
+        value: false
+
+  # ---------------------------------------------------------------------------
+  # Admin — staff console. No public surface.
+  # ---------------------------------------------------------------------------
+  - type: web
+    name: health-commerce-admin
+    runtime: node
+    region: oregon
+    plan: standard
+    branch: main
+    buildCommand: >-
+      corepack enable &&
+      pnpm install --frozen-lockfile &&
+      pnpm --filter @health/database run generate &&
+      pnpm --filter "./packages/*" run build &&
+      pnpm --filter @health/admin run build
+    startCommand: pnpm --filter @health/admin exec next start -p $PORT
+    # The admin console is where claims get approved, refunds get issued and
+    # recalls get authorised. Restrict it to the office network or VPN before
+    # launch — replace this placeholder with real CIDRs. Leaving it open to
+    # 0.0.0.0/0 puts the compliance surface on the public internet behind
+    # nothing but a password and a TOTP code.
+    ipAllowList: []
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: API_INTERNAL_URL
+        sync: false
+      - key: NEXT_PUBLIC_ADMIN_URL
+        sync: false
