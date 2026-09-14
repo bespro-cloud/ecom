@@ -2,6 +2,16 @@
 #
 # Each alert names something a person can act on. Anything that would fire
 # without a corresponding action belongs on a dashboard, not in here.
+#
+# Every expression below references a metric that something actually emits —
+# `http_requests_total`, `http_request_duration_seconds`, `auth_events_total`
+# and `audit_writes_total` from apps/api/src/infrastructure/metrics, and
+# `outbox_pending_messages`, `queue_jobs_processed_total`,
+# `queue_job_duration_seconds` and `queue_dead_lettered_total` from
+# apps/worker/src/metrics.service.ts. An alert on a metric nothing emits is
+# worse than no alert: it looks like coverage and provides none. The gaps that
+# still need instrumentation are listed at the bottom of this file rather than
+# written as rules that would never fire.
 
 groups:
   - name: availability
@@ -69,15 +79,57 @@ groups:
         annotations:
           summary: 'A privileged account was refused sign-in for not enrolling MFA in time'
 
+  - name: commerce
+    interval: 30s
+    rules:
+      # The payment webhook is the one unauthenticated endpoint that moves money.
+      # A 4xx there is a signature that did not verify, which is either a
+      # provider secret gone stale — in which case paid orders are silently not
+      # being marked paid — or somebody forging callbacks. Both want a person.
+      - alert: PaymentWebhookRejected
+        expr: |
+          increase(http_requests_total{route=~".*/webhooks/payments",status=~"4.."}[15m]) > 3
+        for: 0m
+        labels: { severity: critical }
+        annotations:
+          summary: 'Payment webhooks are being rejected — check PAYMENT_WEBHOOK_SECRET before assuming an attack'
+          runbook: docs/operations/RUNBOOK.md#payment-webhook-rejected
+
+      # Distinct from the 4xx case: the signature verified and processing then
+      # failed. The provider will retry, but a sustained rate means orders are
+      # paid with no record of it on this side.
+      - alert: PaymentWebhookProcessingFailing
+        expr: |
+          increase(http_requests_total{route=~".*/webhooks/payments",status=~"5.."}[15m]) > 0
+        for: 0m
+        labels: { severity: critical }
+        annotations:
+          summary: 'Payment webhooks are verifying but failing to process'
+          runbook: docs/operations/RUNBOOK.md#payment-webhook-rejected
+
   - name: workers
     interval: 30s
     rules:
+      # `status="pending"` matters. The gauge carries pending and failed as
+      # separate series, and without the selector a pile of *failed* rows fires
+      # an alert whose summary says the outbox is not draining — a different
+      # incident with a different response. They are two rules now.
       - alert: OutboxBacklog
-        expr: outbox_pending_messages > 500
+        expr: outbox_pending_messages{status="pending"} > 500
         for: 10m
         labels: { severity: warning }
         annotations:
           summary: 'The transactional outbox is not draining — events are not reaching the queues'
+          runbook: docs/operations/RUNBOOK.md#outbox-backlog
+
+      # Rows the dispatcher gave up on. These do not drain on their own and
+      # nothing retries them; each one is an event that never reached a queue.
+      - alert: OutboxDispatchFailures
+        expr: outbox_pending_messages{status="failed"} > 0
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: 'Outbox rows are marked failed — events permanently undispatched'
           runbook: docs/operations/RUNBOOK.md#outbox-backlog
 
       - alert: DeadLetterQueueGrowing
@@ -87,3 +139,56 @@ groups:
         annotations:
           summary: 'Jobs are being dead-lettered on {{ $labels.queue }}'
           runbook: docs/operations/RUNBOOK.md#dead-letter-queue
+
+      # Catches the failure shape the dead-letter alert misses: jobs failing and
+      # being retried repeatedly without yet exhausting their attempts.
+      - alert: QueueJobFailureRate
+        expr: |
+          sum(rate(queue_jobs_processed_total{outcome="failure"}[10m])) by (queue)
+            / clamp_min(sum(rate(queue_jobs_processed_total[10m])) by (queue), 0.001) > 0.1
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: 'More than 10% of {{ $labels.queue }} jobs are failing'
+          runbook: docs/operations/RUNBOOK.md#dead-letter-queue
+
+      # Work that succeeds but arrives late. On this platform the queues carry
+      # order confirmations and subscription billing, so "slow" is a customer
+      # problem well before it is an infrastructure one.
+      - alert: QueueJobsSlow
+        expr: |
+          histogram_quantile(0.95, sum(rate(queue_job_duration_seconds_bucket[10m])) by (le, queue)) > 30
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: '95th percentile job time on {{ $labels.queue }} is above 30s'
+# ---------------------------------------------------------------------------
+# Known gaps: signals that should alert and cannot yet
+#
+# Listed rather than written, because a rule referencing a metric nothing emits
+# reads as coverage on a dashboard and will never fire. Each needs the
+# instrumentation named before a rule is worth adding.
+#
+#   * Backup freshness. The most consequential gap on this list: a backup that
+#     silently stopped running is discovered on the day a restore is needed.
+#     Needs scripts/backup.sh to push a completion timestamp to a Pushgateway
+#     (or write one the node exporter's textfile collector reads), then
+#     `time() - health_commerce_backup_last_success_timestamp > 93600`.
+#
+#   * The analytics retention sweep. Phase 6 documents that raw events and
+#     their salts are deleted after 30 days. A silently failing sweep means
+#     holding health-adjacent data longer than the documentation claims, which
+#     is a compliance gap and not only an operational one. Needs the worker to
+#     emit a last-success timestamp and a deleted-row count.
+#
+#   * AI daily budget exhaustion. Phase 7 refuses calls once the budget is
+#     spent; staff see a refusal and nobody is told why. Needs the gateway to
+#     export today's spend and the limit as gauges.
+#
+#   * Disk space, certificate expiry, and database connection saturation.
+#     These are host and infrastructure signals rather than application ones:
+#     they need node_exporter, blackbox_exporter and postgres_exporter
+#     respectively. postgres_exporter and redis_exporter are already scraped
+#     (see prometheus.yml) but no rules are written against them yet.
+#
+# None of the above is written as a rule here until the metric exists.
