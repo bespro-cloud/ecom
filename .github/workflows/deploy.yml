@@ -59,7 +59,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: infrastructure/docker/api.Dockerfile
+          file: Dockerfile
           push: true
           tags: ${{ env.IMAGE_PREFIX }}-api:${{ steps.meta.outputs.tag }}
           cache-from: type=gha,scope=api

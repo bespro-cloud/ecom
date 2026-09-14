@@ -24,6 +24,10 @@ RUN corepack enable
 FROM base AS deps
 WORKDIR /app
 COPY pnpm-workspace.yaml package.json pnpm-lock.yaml .npmrc ./
+
+# Every workspace manifest — see the note in the root Dockerfile. A package
+# missing here fails the install with ERR_PNPM_OUTDATED_LOCKFILE.
+# KEEP IN SYNC WITH packages/ AND apps/.
 COPY apps/api/package.json apps/api/
 COPY apps/worker/package.json apps/worker/
 COPY apps/storefront/package.json apps/storefront/
@@ -34,6 +38,9 @@ COPY packages/auth/package.json packages/auth/
 COPY packages/validation/package.json packages/validation/
 COPY packages/database/package.json packages/database/
 COPY packages/notifications/package.json packages/notifications/
+COPY packages/payments/package.json packages/payments/
+COPY packages/storage/package.json packages/storage/
+COPY packages/ai/package.json packages/ai/
 COPY packages/ui/package.json packages/ui/
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile
 
@@ -41,9 +48,11 @@ FROM deps AS build
 ARG APP
 WORKDIR /app
 COPY . .
-# The storefront and admin consume workspace TypeScript directly
-# (transpilePackages), but @health/types is compiled and imported as a package.
-RUN pnpm --filter @health/types --filter @health/validation run build
+# The storefront and admin consume some workspace packages as TypeScript
+# directly (transpilePackages), but others — @health/types among them — are
+# compiled and imported as packages. Building all of them is both simpler and
+# proof against the next package that turns out to need compiling.
+RUN pnpm --filter "./packages/*" run build
 # Public URLs are baked into the client bundle at build time; anything secret
 # must never be a NEXT_PUBLIC_* value.
 ARG NEXT_PUBLIC_SITE_URL

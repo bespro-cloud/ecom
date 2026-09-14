@@ -1,12 +1,17 @@
 # syntax=docker/dockerfile:1.7
 
 # ---------------------------------------------------------------------------
-# Worker image
+# API image
 #
-# Runs the outbox dispatcher, the BullMQ processors and the scheduled
-# maintenance jobs. It serves HTTP only for its health endpoints, which are
-# never exposed publicly. Same build strategy as the API image at the
-# repository root.
+# This lives at the repository root rather than under infrastructure/docker/
+# because most hosted platforms look for `./Dockerfile` by default and give a
+# bare "no such file or directory" when it is missing. The worker and web
+# images stay under infrastructure/docker/ — they are always built with an
+# explicit -f.
+#
+# Multi-stage: the toolchain, sources and dev dependencies stay in the builder;
+# the runtime layer carries only what is needed to run. The result runs as an
+# unprivileged user with no shell-accessible build tooling.
 # ---------------------------------------------------------------------------
 
 FROM node:22.13-bookworm-slim AS base
@@ -23,9 +28,14 @@ FROM base AS deps
 WORKDIR /app
 COPY pnpm-workspace.yaml package.json pnpm-lock.yaml .npmrc ./
 
-# Every workspace manifest — see the note in the root Dockerfile. A package
-# missing here fails the install with ERR_PNPM_OUTDATED_LOCKFILE.
-# KEEP IN SYNC WITH packages/ AND apps/.
+# Every workspace manifest, because `--frozen-lockfile` compares the lockfile
+# against the set of projects it can actually see. A package missing here fails
+# the install with ERR_PNPM_OUTDATED_LOCKFILE, which reads like a stale lockfile
+# and is not — it is this list being out of date.
+#
+# KEEP IN SYNC WITH packages/ AND apps/. Adding a workspace package and not
+# adding it here breaks the image build and nothing else, so it is easy to miss
+# until a deploy.
 COPY apps/api/package.json apps/api/
 COPY apps/worker/package.json apps/worker/
 COPY apps/storefront/package.json apps/storefront/
@@ -46,9 +56,12 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile
 FROM deps AS build
 WORKDIR /app
 COPY . .
+# `--filter "./packages/*"` rather than an enumerated list: the enumerated form
+# silently skipped packages/payments, packages/storage and packages/ai when
+# those were added, and the API imports all three. This matches what CI builds.
 RUN pnpm --filter @health/database run generate \
  && pnpm --filter "./packages/*" run build \
- && pnpm --filter @health/worker run build
+ && pnpm --filter @health/api run build
 # Drop dev dependencies before they are copied into the runtime layer.
 RUN pnpm prune --prod
 
@@ -62,20 +75,20 @@ RUN useradd --system --uid 10001 --create-home --shell /usr/sbin/nologin app
 
 COPY --from=build --chown=app:app /app/node_modules ./node_modules
 COPY --from=build --chown=app:app /app/package.json ./package.json
-COPY --from=build --chown=app:app /app/apps/worker/node_modules ./apps/worker/node_modules
-COPY --from=build --chown=app:app /app/apps/worker/dist ./apps/worker/dist
-COPY --from=build --chown=app:app /app/apps/worker/package.json ./apps/worker/package.json
+COPY --from=build --chown=app:app /app/apps/api/node_modules ./apps/api/node_modules
+COPY --from=build --chown=app:app /app/apps/api/dist ./apps/api/dist
+COPY --from=build --chown=app:app /app/apps/api/package.json ./apps/api/package.json
 COPY --from=build --chown=app:app /app/packages ./packages
 COPY --from=build --chown=app:app /app/prisma ./prisma
 
 USER app
-EXPOSE 4100
+EXPOSE 4000
 
 # The orchestrator's own probe should be authoritative, but a HEALTHCHECK makes
 # `docker ps` honest for anyone debugging locally.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD node -e "fetch('http://127.0.0.1:'+(process.env.WORKER_PORT||4100)+'/health/live').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+  CMD node -e "fetch('http://127.0.0.1:'+(process.env.API_PORT||4000)+'/health/live').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
 # dumb-init reaps zombies and forwards SIGTERM, so graceful shutdown works.
 ENTRYPOINT ["dumb-init", "--"]
-CMD ["node", "apps/worker/dist/main.js"]
+CMD ["node", "apps/api/dist/main.js"]

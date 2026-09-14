@@ -74,7 +74,9 @@ services:
   api:
     build:
       context: .
-      dockerfile: infrastructure/docker/api.Dockerfile
+      # At the repository root so hosted platforms that default to ./Dockerfile
+      # find it. The worker and web images keep an explicit path.
+      dockerfile: Dockerfile
     restart: unless-stopped
     env_file: [.env]
     environment:
