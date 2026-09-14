@@ -7,3 +7,4 @@ export * from './content.js';
 export * from './commerce.js';
 export * from './compliance.js';
 export * from './lifecycle.js';
+export * from './growth.js';

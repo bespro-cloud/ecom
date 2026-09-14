@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { notFound } from 'next/navigation';
 import { ApiError } from '@/lib/api-client';
+import { redirectOrNotFound } from '@/lib/redirects';
 import { fetchProduct, type ProductDetail } from '@/lib/catalogue';
 import { publicConfig } from '@/lib/env';
 import { formatMoney } from '@/lib/format';
@@ -9,6 +9,7 @@ import { BreadcrumbStructuredData, ProductStructuredData } from '@/components/st
 import { ProductGallery } from '@/components/product-gallery';
 import { AddToCart } from '@/components/add-to-cart';
 import { ProductReviews } from '@/components/product-reviews';
+import { TrackProductView } from '@/components/analytics';
 import { fetchProductReviews } from '@/lib/lifecycle';
 import { currentUser } from '@/lib/session';
 
@@ -18,7 +19,13 @@ async function load(slug: string): Promise<ProductDetail> {
   } catch (error) {
     // A withdrawn listing is a 404 to a customer, not an error page. The
     // distinction matters: any other failure must still be loud.
-    if (error instanceof ApiError && error.status === 404) notFound();
+    //
+    // Before giving up, ask whether the listing simply moved. A product that
+    // has been indexed for two years and silently starts 404ing after a rename
+    // loses its ranking and the people who bookmarked it.
+    if (error instanceof ApiError && error.status === 404) {
+      await redirectOrNotFound(`/products/${slug}`);
+    }
     throw error;
   }
 }
@@ -74,6 +81,7 @@ export default async function ProductPage({ params }: { params: Promise<{ slug: 
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-10 sm:px-6 lg:px-8">
+      <TrackProductView productId={product.id} />
       <ProductStructuredData product={product} url={url} />
       <BreadcrumbStructuredData trail={trail} siteUrl={publicConfig.siteUrl} />
 
@@ -126,6 +134,7 @@ export default async function ProductPage({ params }: { params: Promise<{ slug: 
           <div className="mt-6">
             <AddToCart
               variantId={product.variants[0]?.id ?? ''}
+              productId={product.id}
               availableQuantity={product.availableQuantity ?? null}
             />
           </div>

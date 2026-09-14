@@ -3,11 +3,13 @@ import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Request, Response } from 'express';
 import {
   applyCouponSchema,
+  completeCheckoutSchema,
   confirmCheckoutSchema,
   startCheckoutSchema,
   updateCheckoutSchema,
   uuidSchema,
   type ApplyCouponInput,
+  type CompleteCheckoutInput,
   type ConfirmCheckoutInput,
   type StartCheckoutInput,
   type UpdateCheckoutInput,
@@ -24,6 +26,7 @@ import { PrismaService } from '../../../infrastructure/prisma/prisma.service.js'
 import { CartService } from '../cart/cart.service.js';
 import { readCartToken, setCartCookie } from '../cart/cart.cookie.js';
 import { CheckoutService, type CheckoutView } from './checkout.service.js';
+import { AnalyticsCollectionService } from '../../growth/analytics/collection.service.js';
 
 /**
  * Checkout.
@@ -38,6 +41,7 @@ import { CheckoutService, type CheckoutView } from './checkout.service.js';
 export class CheckoutController {
   constructor(
     private readonly checkouts: CheckoutService,
+    private readonly analytics: AnalyticsCollectionService,
     private readonly carts: CartService,
     private readonly prisma: PrismaService,
     private readonly config: AppConfigService,
@@ -144,12 +148,20 @@ export class CheckoutController {
   })
   async complete(
     @Param('id', new ZodValidationPipe(uuidSchema)) id: string,
+    @Body(zodBody(completeCheckoutSchema)) input: CompleteCheckoutInput,
     @Req() request: Request,
     @OptionalUser() principal?: AuthenticatedPrincipal,
   ): Promise<{ orderId: string; reference: string }> {
     await this.assertOwned(id, request, principal);
 
     const { orderId } = await this.checkouts.complete(id, this.actor(principal, request));
+
+    // The conversion is recorded from the server, from a real order, and the
+    // session id is used here and forgotten. Nothing stores the link between
+    // this order — which names a customer — and the visit that produced it.
+    // It is deliberately awaited-but-swallowed inside the service: a
+    // measurement failure must never fail a checkout that already took money.
+    await this.analytics.recordConversion(input.analyticsSessionId ?? null);
     const order = await this.prisma.order.findUniqueOrThrow({
       where: { id: orderId },
       select: { id: true, reference: true },

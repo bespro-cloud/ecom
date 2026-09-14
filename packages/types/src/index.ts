@@ -11,3 +11,4 @@ export * from './commerce.js';
 export * from './pricing.js';
 export * from './compliance.js';
 export * from './lifecycle.js';
+export * from './analytics.js';

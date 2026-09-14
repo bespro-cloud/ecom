@@ -16,6 +16,7 @@ import { RefundsService } from './refunds/refunds.service.js';
 import { ShippingService } from './shipping/shipping.service.js';
 import { CommerceAdminController } from './commerce.controller.js';
 import { CouponsService } from '../lifecycle/coupons/coupons.service.js';
+import { GrowthModule } from '../growth/growth.module.js';
 
 /**
  * Commerce: carts, checkout, orders, payments, refunds, inventory, shipping.
@@ -25,7 +26,7 @@ import { CouponsService } from '../lifecycle/coupons/coupons.service.js';
  * unless the warehouse could actually fill an order for it.
  */
 @Module({
-  imports: [AuditModule, SettingsModule],
+  imports: [GrowthModule, AuditModule, SettingsModule],
   controllers: [
     CartController,
     CheckoutController,

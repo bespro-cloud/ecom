@@ -464,9 +464,135 @@ collects a due renewal and finds nothing due on the next pass.
 
 ---
 
-## Phase 6 — Growth
+## Phase 6 — Growth ✅ Complete
 
-First-party analytics, SEO automation, blog, landing pages, conversion tracking.
+First-party analytics, SEO automation, blog, conversion tracking.
+
+**Delivered**
+
+- First-party analytics with no third-party script, pixel or tag manager
+  anywhere on the site
+- Consent-gated collection that honours Do Not Track and Global Privacy Control
+  above the banner, and refuses bots
+- A purchase funnel and conversion rate computed from aggregates
+- Campaign attribution and revenue by channel, with revenue read from the
+  orders table
+- Hourly rollups that recompute rather than increment, and a daily retention
+  sweep that deletes raw events and the salts that went with them
+- A blog with a draft/publish model, and a compliance gate: a post that names a
+  product cannot be published by its author
+- Compliance decisions bound to the exact text that was approved, enforced by a
+  database CHECK over a content hash
+- Redirects written automatically when a published product, page or post is
+  renamed, with loop refusal and chain collapsing
+- An SEO audit that reports problems, a sitemap covering products, categories,
+  pages and posts, and `noindex` honoured at the source
+- Admin console for analytics, the journal, redirects and the SEO audit;
+  storefront blog and consent banner
+
+**The rules that shaped it**
+
+**What somebody browses on a supplements site is health-adjacent information
+about them.** A record that a named person looked at a menopause supplement, a
+fertility supplement or a sleep aid is a health inference, and the FTC has
+brought enforcement actions against health companies for exactly that data
+reaching analytics vendors and advertisers. Every decision in the analytics
+design follows from this, so the system is built to be _incapable_ of a
+per-person browsing profile rather than merely not building one today:
+
+- No analytics table has a customer id, user id, email, order id or IP address,
+  and a database event trigger fails any migration that would add one.
+- Visitor identifiers are salted hashes whose salt rotates daily and is deleted
+  with the events it protected. The same person on two days is two visitors,
+  and yesterday's hashes stop being reproducible from an IP address by anyone,
+  including someone holding the database.
+- Query strings are discarded in full before a path is stored — not filtered,
+  discarded — because that is where an email, a reset token or a support
+  reference ends up by accident.
+- Referrers are reduced to a host: a referrer path is a page on somebody else's
+  site and carries their search terms.
+- Raw events live 30 days. The rollups that outlive them are counts.
+
+**Conversion is measured without joining a person to their browsing.** The order
+carries denormalised campaign labels; the analytics session records the furthest
+funnel step it reached. Conversion rate is one aggregate divided by another.
+There is deliberately no session id on an order or a checkout, because that
+single foreign key would reconstruct the profile everything else prevents — and
+an integration test asserts the column does not exist.
+
+**Revenue never comes from a browser.** Money is read from the orders table, and
+`order_placed` is the one event type a client may not report: a conversion
+claimed by a browser is a conversion claimed by whoever holds the keyboard.
+
+**A blog post that names a product is marketing copy about a regulated
+product.** An article headlined "how magnesium helps you sleep" that links to a
+magnesium product is making a claim about it, and prose in a journal rather than
+a bullet on a listing is not a distinction a regulator draws. So those posts go
+to `COMPLIANCE_APPROVE` — held by compliance reviewers, not by content staff,
+marketing, or `ADMIN` — with a second factor and written reasoning. A post that
+names no product publishes on the editor's own authority: the gate is on claims
+about products, not a bureaucracy for every page.
+
+**"SEO automation" means the mechanical half only.** Sitemaps, canonicals,
+redirects, structured data and an audit that reports problems: all automated.
+Copy: never. A meta description for a supplement is a public statement about a
+health product, and a generated one is exactly the fluent, plausible sentence
+that ends up claiming something nobody reviewed. The audit says a description is
+missing; a person writes it.
+
+**Verified**
+
+| Suite                     | Count | Against                  |
+| ------------------------- | ----: | ------------------------ |
+| Shared package unit tests |   354 | pure logic               |
+| Storefront unit tests     |    45 | pure logic               |
+| API unit tests            |    67 | pure logic               |
+| Database integration      |    17 | real PostgreSQL          |
+| API integration (e2e)     |   328 | real PostgreSQL + Redis  |
+| Worker integration        |     9 | real PostgreSQL + BullMQ |
+
+The growth suite proves the properties the phase exists for: a beacon carrying a
+query string stores a path with the query gone and the email in it absent from
+the row; a purchase reported by a browser is refused; an unexpected field is
+refused rather than ignored; Global Privacy Control overrides a consent flag in
+the body; no IP address appears anywhere and no analytics table has a column one
+could go in; `ALTER TABLE analytics_events ADD COLUMN customer_id` fails; a
+funnel that widens as it descends is refused by a CHECK; three rollup runs over
+one order produce one order and not three; cancelled orders are excluded from
+revenue; neither `orders` nor `checkouts` has a session column; a post naming a
+product cannot be published by its author, by an administrator, or at all
+without compliance sign-off; text edited after approval cannot be published and
+cannot be forced past the CHECK by a direct `UPDATE`; a renamed product keeps
+its old URL working and a second rename collapses the chain rather than
+extending it; a redirect loop is refused; and the SEO audit reports a missing
+description without writing one.
+
+**Not done in Phase 6**
+
+- **Landing pages as a distinct type.** The roadmap listed them; CMS pages
+  already do the job, with blocks, drafts, publishing and SEO metadata, and
+  campaign attribution works on any URL. A second page type would have been a
+  duplicate with a different name.
+- **A/B testing.** Splitting traffic needs a stable per-visitor assignment
+  across visits, which is precisely the cross-day identifier this design
+  deliberately does not keep. Doing it properly needs a decision about that
+  trade-off, not a quiet exception to it.
+- **Cross-day unique visitors.** Cannot be computed, by construction. The
+  dashboard says "visitors per day, summed" rather than implying a number the
+  system will not produce.
+- **Geographic reporting below country level.** A city on a health site is a
+  small crowd; a CHECK refuses anything but a two-letter country code.
+- **Search-term analytics.** `search_performed` records that a search happened
+  and not what was typed. On this site a search box is where somebody types a
+  symptom.
+- **Email and SMS campaign sending.** Transactional messaging exists from Phase
+  5; marketing sends do not, and would need the consent ledger wired to a
+  suppression list before they should.
+- **Automated browser E2E (Playwright).** Still verified against running
+  services by hand. Now six phases overdue.
+- **Load testing.** No performance claim is made anywhere.
+
+---
 
 ## Phase 7 — AI
 

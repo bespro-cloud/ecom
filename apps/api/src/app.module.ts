@@ -20,6 +20,7 @@ import { ContentModule } from './modules/content/content.module.js';
 import { CommerceModule } from './modules/commerce/commerce.module.js';
 import { ComplianceModule } from './modules/compliance/compliance.module.js';
 import { LifecycleModule } from './modules/lifecycle/lifecycle.module.js';
+import { GrowthModule } from './modules/growth/growth.module.js';
 import { HealthModule } from './modules/health/health.module.js';
 import { CorrelationIdMiddleware } from './common/middleware/correlation-id.middleware.js';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter.js';
@@ -62,6 +63,7 @@ import { RateLimitGuard } from './common/guards/rate-limit.guard.js';
     ComplianceModule,
     CommerceModule,
     LifecycleModule,
+    GrowthModule,
     HealthModule,
   ],
   providers: [

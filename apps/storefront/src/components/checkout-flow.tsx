@@ -6,6 +6,7 @@ import { Alert, Button, Field } from '@health/ui';
 import type { Cart, Checkout } from '@/lib/commerce';
 import { clientRequest, ClientApiError } from '@/lib/client';
 import { formatMoney } from '@/lib/format';
+import { currentAnalyticsSessionId, readCampaign, track } from '@/components/analytics';
 
 /**
  * The checkout flow.
@@ -71,7 +72,7 @@ export function CheckoutFlow({ cart }: { cart: Cart }) {
     try {
       return await clientRequest<Checkout>('/api/v1/checkout', {
         method: 'POST',
-        body: { idempotencyKey: idempotencyKey.current, email },
+        body: { attribution: readCampaign(), idempotencyKey: idempotencyKey.current, email },
       });
     } catch (caught) {
       setError(
@@ -90,6 +91,7 @@ export function CheckoutFlow({ cart }: { cart: Cart }) {
     try {
       const started = checkout ?? (await start());
       if (!started) return;
+      track('checkout_started');
 
       const updated = await clientRequest<Checkout>(`/api/v1/checkout/${started.id}`, {
         method: 'PATCH',
@@ -161,7 +163,14 @@ export function CheckoutFlow({ cart }: { cart: Cart }) {
       // and the server still refuses unless the provider reports it settled.
       const placed = await clientRequest<{ orderId: string; reference: string }>(
         `/api/v1/checkout/${checkout.id}/complete`,
-        { method: 'POST' },
+        {
+          method: 'POST',
+          // The server records the conversion from the real order and forgets
+          // this id immediately. It is deliberately not stored on the checkout
+          // or the order: that one field would join a named customer to every
+          // page their visit viewed.
+          body: { analyticsSessionId: currentAnalyticsSessionId() ?? undefined },
+        },
       );
 
       router.push(`/orders/${placed.orderId}?placed=1`);

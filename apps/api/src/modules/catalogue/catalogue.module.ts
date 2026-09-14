@@ -11,6 +11,7 @@ import { PostgresSearchProvider } from './search/postgres-search.provider.js';
 import { SEARCH_PROVIDER } from './search/search.types.js';
 import { CatalogueController } from './catalogue.controller.js';
 import { AdminCatalogueController } from './admin-catalogue.controller.js';
+import { GrowthModule } from '../growth/growth.module.js';
 
 /**
  * The catalogue.
@@ -22,7 +23,7 @@ import { AdminCatalogueController } from './admin-catalogue.controller.js';
 @Module({
   // CommerceModule for the publishing checklist's inventory check: a product
   // cannot be published unless the warehouse could actually fill an order.
-  imports: [MediaModule, CommerceModule],
+  imports: [GrowthModule, MediaModule, CommerceModule],
   controllers: [CatalogueController, AdminCatalogueController],
   providers: [
     // The product page shows its published reviews. Provided here rather

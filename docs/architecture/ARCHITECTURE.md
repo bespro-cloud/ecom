@@ -174,3 +174,15 @@ until Phase 8 measures it.
 - [../deployment/DEPLOYMENT.md](../deployment/DEPLOYMENT.md)
 - [../api/API.md](../api/API.md)
 - [../operations/RUNBOOK.md](../operations/RUNBOOK.md)
+
+### The Prisma schema is a global build input
+
+`prisma/schema.prisma` lives at the repository root, outside
+`packages/database`, so Turborepo does not see it as an input to that package's
+build. Without help, editing the schema leaves the cached build — including the
+generated client — untouched, and the next build type-checks against a client
+that no longer matches the database.
+
+That failed exactly once, quietly, which is why it is written down: the schema
+and its migrations are listed in `globalDependencies`, so a schema change
+invalidates every cached build rather than only the ones somebody remembered.

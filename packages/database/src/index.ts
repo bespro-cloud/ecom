@@ -16,3 +16,10 @@ export {
   type BillingOutcome,
   type BillingPaymentProvider,
 } from './maintenance/subscriptions.js';
+export {
+  rollUpDay,
+  rollUpRecentDays,
+  pruneAnalytics,
+  type RollupDeps,
+  type RollupResult,
+} from './maintenance/analytics.js';

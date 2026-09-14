@@ -144,6 +144,14 @@ export class CheckoutService {
           cartId,
           idempotencyKey: input.idempotencyKey,
           email: input.email,
+          // Campaign labels, copied onto the order when it is placed. Labels
+          // only: there is deliberately no session identifier here, because a
+          // checkout becomes an order that names a customer and that one field
+          // would join a person to their browsing.
+          attributionChannel: input.attribution?.channel ?? null,
+          attributionSource: input.attribution?.source ?? null,
+          attributionMedium: input.attribution?.medium ?? null,
+          attributionCampaign: input.attribution?.campaign ?? null,
           expiresAt: addSeconds(this.clock.now(), await this.holdSeconds()),
         },
         select: { id: true },

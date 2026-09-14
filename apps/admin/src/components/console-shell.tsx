@@ -28,6 +28,7 @@ const NAV: NavItem[] = [
   { href: '/inventory/warehouses', label: 'Warehouses', permission: 'INVENTORY_READ' },
   { href: '/shipping', label: 'Shipping rates', permission: 'ORDER_READ' },
   { href: '/content', label: 'Pages', permission: 'CONTENT_READ' },
+  { href: '/blog', label: 'Journal', permission: 'BLOG_READ' },
   { href: '/reviews', label: 'Review moderation', permission: 'REVIEW_READ' },
   { href: '/support', label: 'Support inbox', permission: 'SUPPORT_READ' },
   { href: '/compliance', label: 'Compliance', permission: 'COMPLIANCE_READ' },
@@ -38,6 +39,9 @@ const NAV: NavItem[] = [
   { href: '/users', label: 'Staff & customers', permission: 'USER_READ' },
   { href: '/erasure-requests', label: 'Deletion requests', permission: 'CUSTOMER_READ' },
   { href: '/roles', label: 'Roles & permissions', permission: 'ROLE_READ' },
+  { href: '/analytics', label: 'Analytics', permission: 'ANALYTICS_READ' },
+  { href: '/seo', label: 'SEO audit', permission: 'SEO_READ' },
+  { href: '/redirects', label: 'Redirects', permission: 'SEO_READ' },
   { href: '/audit', label: 'Audit log', permission: 'AUDIT_READ' },
   { href: '/settings', label: 'Settings & flags', permission: 'SYSTEM_SETTINGS' },
 ];

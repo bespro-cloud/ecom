@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import { notFound } from 'next/navigation';
+import { redirectOrNotFound } from '@/lib/redirects';
 import { ApiError, apiRequest } from '@/lib/api-client';
 import { PageBlocks, type Block } from '@/components/page-blocks';
 
@@ -32,7 +32,11 @@ async function load(slug: string): Promise<PublishedPage> {
       revalidate: 60,
     });
   } catch (error) {
-    if (error instanceof ApiError && error.status === 404) notFound();
+    // A renamed page keeps working: policy pages are exactly the ones somebody
+    // linked to from an email two years ago.
+    if (error instanceof ApiError && error.status === 404) {
+      await redirectOrNotFound(`/pages/${slug}`);
+    }
     throw error;
   }
 }

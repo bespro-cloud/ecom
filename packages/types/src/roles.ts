@@ -128,6 +128,11 @@ export const SYSTEM_ROLES: readonly SystemRoleDefinition[] = [
       'EVIDENCE_APPROVE',
       'COMPLIANCE_READ',
       'COMPLIANCE_APPROVE',
+      // A blog post that names a product is marketing copy about a regulated
+      // product, and this role signs it off. It needs to be able to read the
+      // post it is ruling on — a reviewer who cannot see the text would be
+      // approving a title.
+      'BLOG_READ',
       'RECALL_READ',
       'RECALL_MANAGE',
       'RECALL_NOTIFY',

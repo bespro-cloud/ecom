@@ -12,6 +12,7 @@ import { MaintenanceService } from './processors/maintenance.service.js';
 import { CommerceMaintenanceService } from './processors/commerce-maintenance.service.js';
 import { ComplianceMaintenanceService } from './processors/compliance-maintenance.service.js';
 import { SubscriptionBillingService } from './processors/subscription-billing.service.js';
+import { AnalyticsMaintenanceService } from './processors/analytics-maintenance.service.js';
 import { WorkerHealthController } from './health/health.controller.js';
 
 @Module({
@@ -46,6 +47,7 @@ import { WorkerHealthController } from './health/health.controller.js';
     CommerceMaintenanceService,
     ComplianceMaintenanceService,
     SubscriptionBillingService,
+    AnalyticsMaintenanceService,
   ],
 })
 export class WorkerModule {}

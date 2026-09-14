@@ -11,6 +11,7 @@ import {
 import { CategoriesService, type CategoryTreeNode } from './categories/categories.service.js';
 import { IngredientsService, type IngredientView } from './ingredients/ingredients.service.js';
 import type { SearchFacets } from './search/search.types.js';
+import { PrismaService } from '../../infrastructure/prisma/prisma.service.js';
 
 /**
  * The public catalogue.
@@ -27,6 +28,7 @@ export class CatalogueController {
     private readonly catalogue: CatalogueService,
     private readonly categories: CategoriesService,
     private readonly ingredients: IngredientsService,
+    private readonly prisma: PrismaService,
   ) {}
 
   @Get('products')
@@ -87,14 +89,70 @@ export class CatalogueController {
   async sitemap(): Promise<{
     products: Array<{ slug: string; updatedAt: string; noindex: boolean }>;
     categories: Array<{ slug: string }>;
+    pages: Array<{ slug: string; updatedAt: string }>;
+    posts: Array<{ slug: string; updatedAt: string }>;
   }> {
-    const [products, categories] = await Promise.all([
+    const [products, categories, pages, posts] = await Promise.all([
       this.catalogue.listPublishedForSitemap(),
       this.categories.list(false),
+      this.sitemapPages(),
+      this.sitemapPosts(),
     ]);
     return {
+      // `noindex` is honoured here rather than left to the storefront. A page
+      // an editor asked to be kept out of the index must not be listed in the
+      // file that exists to tell search engines what to index.
       products: products.filter((product) => !product.noindex),
       categories: categories.map((category) => ({ slug: category.slug })),
+      pages,
+      posts,
     };
+  }
+
+  private async sitemapPages(): Promise<Array<{ slug: string; updatedAt: string }>> {
+    const rows = await this.prisma.page.findMany({
+      where: { status: 'PUBLISHED', deletedAt: null },
+      select: { id: true, slug: true, updatedAt: true },
+      orderBy: { updatedAt: 'desc' },
+      take: 5000,
+    });
+    return this.withoutNoindex(rows, 'PAGE');
+  }
+
+  private async sitemapPosts(): Promise<Array<{ slug: string; updatedAt: string }>> {
+    const rows = await this.prisma.blogPost.findMany({
+      where: { status: 'PUBLISHED', deletedAt: null },
+      select: { id: true, slug: true, updatedAt: true },
+      orderBy: { publishedAt: 'desc' },
+      take: 5000,
+    });
+    return this.withoutNoindex(rows, 'BLOG_POST');
+  }
+
+  private async withoutNoindex(
+    rows: Array<{ id: string; slug: string; updatedAt: Date }>,
+    entityType: 'PAGE' | 'BLOG_POST',
+  ): Promise<Array<{ slug: string; updatedAt: string }>> {
+    if (rows.length === 0) return [];
+
+    // Blog posts have no SeoMetadata entity type of their own, so only pages
+    // can carry a noindex flag today. Querying rather than assuming means
+    // adding one later needs no change here.
+    const hidden =
+      entityType === 'PAGE'
+        ? await this.prisma.seoMetadata.findMany({
+            where: {
+              entityType: 'PAGE',
+              entityId: { in: rows.map((row) => row.id) },
+              noindex: true,
+            },
+            select: { entityId: true },
+          })
+        : [];
+    const excluded = new Set(hidden.map((row) => row.entityId));
+
+    return rows
+      .filter((row) => !excluded.has(row.id))
+      .map((row) => ({ slug: row.slug, updatedAt: row.updatedAt.toISOString() }));
   }
 }

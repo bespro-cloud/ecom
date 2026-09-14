@@ -205,12 +205,43 @@ export const LIFECYCLE_AUDIT_ACTIONS = {
   ERASURE_REFUSED: 'account.erasure.refused',
 } as const;
 
+/**
+ * Phase 6 — growth.
+ *
+ * Blog publication is here for the same reason review publication is: a post
+ * that names a product is marketing copy about a regulated product, and "who
+ * put this live and on whose approval?" is a question that gets asked later.
+ *
+ * Analytics collection is deliberately NOT audited per event. An audit row per
+ * page view would be a per-visitor browsing log written into the one table the
+ * business keeps forever — the exact record the analytics design exists to
+ * prevent. Configuration changes to analytics are audited; the measurements
+ * themselves are not.
+ */
+export const GROWTH_AUDIT_ACTIONS = {
+  BLOG_POST_CREATED: 'blog.post.created',
+  BLOG_POST_UPDATED: 'blog.post.updated',
+  BLOG_POST_SUBMITTED: 'blog.post.submitted_for_review',
+  BLOG_POST_APPROVED: 'blog.post.compliance_approved',
+  BLOG_POST_REJECTED: 'blog.post.compliance_rejected',
+  BLOG_POST_PUBLISHED: 'blog.post.published',
+  BLOG_POST_UNPUBLISHED: 'blog.post.unpublished',
+  BLOG_CATEGORY_CREATED: 'blog.category.created',
+
+  REDIRECT_CREATED: 'redirect.created',
+  REDIRECT_UPDATED: 'redirect.updated',
+  REDIRECT_DELETED: 'redirect.deleted',
+
+  ANALYTICS_RETENTION_PRUNED: 'analytics.retention.pruned',
+} as const;
+
 export const ALL_AUDIT_ACTIONS = {
   ...AUDIT_ACTIONS,
   ...CATALOGUE_AUDIT_ACTIONS,
   ...COMMERCE_AUDIT_ACTIONS,
   ...COMPLIANCE_AUDIT_ACTIONS,
   ...LIFECYCLE_AUDIT_ACTIONS,
+  ...GROWTH_AUDIT_ACTIONS,
 } as const;
 
 export type AuditAction = (typeof ALL_AUDIT_ACTIONS)[keyof typeof ALL_AUDIT_ACTIONS];
@@ -267,4 +298,8 @@ export const NOTABLE_AUDIT_ACTIONS: readonly AuditAction[] = [
   LIFECYCLE_AUDIT_ACTIONS.REVIEW_ADVERSE_EVENT_FLAGGED,
   LIFECYCLE_AUDIT_ACTIONS.SUBSCRIPTION_RENEWAL_FAILED,
   LIFECYCLE_AUDIT_ACTIONS.ERASURE_COMPLETED,
+  // Publishing a blog post that names a product puts marketing copy about a
+  // regulated product on a public page, on somebody's named approval.
+  GROWTH_AUDIT_ACTIONS.BLOG_POST_PUBLISHED,
+  GROWTH_AUDIT_ACTIONS.BLOG_POST_APPROVED,
 ];

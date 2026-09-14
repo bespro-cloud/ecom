@@ -35,6 +35,7 @@ import {
   toAdminProductView,
   type AdminProductView,
 } from './product.view.js';
+import { RedirectsService } from '../../growth/redirects/redirects.service.js';
 
 /**
  * Product administration.
@@ -52,6 +53,7 @@ export class ProductsService {
     private readonly audit: AuditService,
     private readonly checklist: PublishChecklistService,
     private readonly settings: SettingsService,
+    private readonly redirects: RedirectsService,
     private readonly logger: PinoLogger,
     @Inject(SEARCH_PROVIDER) private readonly search: SearchProvider,
     @Inject(CLOCK) private readonly clock: Clock,
@@ -204,6 +206,20 @@ export class ProductsService {
 
     try {
       await this.prisma.$transaction(async (tx) => {
+        // A renamed listing leaves its indexed URL behind. Writing the redirect
+        // in the same transaction as the rename is the point: a rename that
+        // committed without its redirect is a silent 404 on a page that has
+        // been ranking for two years, and nobody notices until the traffic has
+        // already gone.
+        if (input.slug && input.slug !== existing.slug && existing.status === 'PUBLISHED') {
+          await this.redirects.recordSlugChange(
+            tx,
+            `/products/${existing.slug}`,
+            `/products/${input.slug}`,
+            { reason: 'product', actor },
+          );
+        }
+
         const updated = await tx.product.update({
           where: { id },
           data: {

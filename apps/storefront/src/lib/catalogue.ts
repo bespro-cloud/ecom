@@ -194,6 +194,8 @@ export async function fetchCategoryTree(): Promise<CategoryNode[]> {
 export async function fetchSitemapEntries(): Promise<{
   products: Array<{ slug: string; updatedAt: string }>;
   categories: Array<{ slug: string }>;
+  pages: Array<{ slug: string; updatedAt: string }>;
+  posts: Array<{ slug: string; updatedAt: string }>;
 }> {
   return apiRequest('/api/v1/catalogue/sitemap', {
     forwardCookies: false,

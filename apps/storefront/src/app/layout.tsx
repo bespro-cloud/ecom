@@ -6,6 +6,7 @@ import { currentUser } from '@/lib/session';
 import { fetchCart } from '@/lib/commerce';
 import { SiteHeader } from '@/components/site-header';
 import { SiteFooter } from '@/components/site-footer';
+import { AnalyticsConsentBanner, AnalyticsPageViews } from '@/components/analytics';
 import './globals.css';
 
 const inter = Inter({
@@ -57,11 +58,15 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     <html lang="en" className={inter.variable}>
       <body className="flex min-h-screen flex-col font-sans">
         <SkipToContent />
+        {/* Nothing is measured until the visitor answers the banner, and a
+            browser-level opt-out is honoured without asking at all. */}
+        <AnalyticsPageViews />
         <SiteHeader user={user} cartCount={cartCount} />
         <main id="main-content" className="flex-1">
           {children}
         </main>
         <SiteFooter />
+        <AnalyticsConsentBanner />
       </body>
     </html>
   );

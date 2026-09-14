@@ -141,6 +141,15 @@ export class OrdersService {
           billingAddress: (checkout.billingAddress ?? null) as never,
           shippingMethodCode: checkout.shippingMethodCode,
           couponCode: checkout.couponCode,
+          // Campaign labels, copied from the checkout. Labels, never a session
+          // id: this row names a customer, and a session id here would join
+          // that person to every page their visit viewed. Campaign ROI is
+          // computed by grouping these labels by day — an aggregate divided by
+          // an aggregate — which needs the labels and not the link.
+          attributionChannel: checkout.attributionChannel,
+          attributionSource: checkout.attributionSource,
+          attributionMedium: checkout.attributionMedium,
+          attributionCampaign: checkout.attributionCampaign,
           customerNote: checkout.cart.note,
           placedAt: this.clock.now(),
           ...(payment.status === 'CAPTURED' ? { paidAt: this.clock.now() } : {}),

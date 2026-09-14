@@ -26,7 +26,12 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const base = publicConfig.siteUrl;
 
   const [catalogue, pages] = await Promise.all([
-    fetchSitemapEntries().catch(() => ({ products: [], categories: [] })),
+    fetchSitemapEntries().catch(() => ({
+      products: [],
+      categories: [],
+      pages: [],
+      posts: [],
+    })),
     apiRequest<{ pages: SitemapPage[] }>('/api/v1/content/sitemap', {
       forwardCookies: false,
       revalidate: 3600,
@@ -61,6 +66,25 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       lastModified: new Date(page.updatedAt),
       changeFrequency: 'monthly' as const,
       priority: 0.5,
+    })),
+    ...(catalogue.posts.length > 0
+      ? [
+          {
+            url: `${base}/blog`,
+            lastModified: new Date(),
+            changeFrequency: 'weekly' as const,
+            priority: 0.6,
+          },
+        ]
+      : []),
+    // Published posts only, and any marked noindex are excluded by the API
+    // before they reach here — a sitemap must not contradict a page's own
+    // robots directive.
+    ...catalogue.posts.map((post) => ({
+      url: `${base}/blog/${post.slug}`,
+      lastModified: new Date(post.updatedAt),
+      changeFrequency: 'monthly' as const,
+      priority: 0.6,
     })),
   ];
 }

@@ -112,9 +112,29 @@ export type CartNoteInput = z.infer<typeof cartNoteSchema>;
 // Checkout
 // ---------------------------------------------------------------------------
 
+/**
+ * Campaign labels carried from the visit into the checkout.
+ *
+ * Labels only — a source, a medium, a campaign name. Deliberately NOT a session
+ * identifier: a session id on a checkout would end up on the order, and an
+ * order names a customer. That one field would join a named person to every
+ * page their visit viewed, which is exactly what the analytics design prevents.
+ *
+ * These are attacker-controlled strings that will be rendered on a dashboard,
+ * so they are bounded and nothing downstream joins on them to a person.
+ */
+export const checkoutAttributionSchema = z.object({
+  channel: z.string().trim().max(120).optional(),
+  source: z.string().trim().max(120).optional(),
+  medium: z.string().trim().max(120).optional(),
+  campaign: z.string().trim().max(120).optional(),
+});
+export type CheckoutAttributionInput = z.infer<typeof checkoutAttributionSchema>;
+
 export const startCheckoutSchema = z.object({
   idempotencyKey: idempotencyKeySchema,
   email: z.string().trim().toLowerCase().email('Enter a valid email address.').max(320),
+  attribution: checkoutAttributionSchema.optional(),
 });
 export type StartCheckoutInput = z.infer<typeof startCheckoutSchema>;
 
@@ -142,6 +162,21 @@ export const confirmCheckoutSchema = z.object({
   paymentMethodToken: z.string().trim().max(500).optional(),
 });
 export type ConfirmCheckoutInput = z.infer<typeof confirmCheckoutSchema>;
+
+/**
+ * Placing the order.
+ *
+ * `analyticsSessionId` is passed **here** rather than stored on the checkout,
+ * and that is a deliberate privacy choice rather than an accident of shape. A
+ * checkout row carries an email and becomes an order that names a customer, so
+ * a session id stored on it would be a permanent join from a named person to
+ * every page their visit viewed. Passed at completion, it is used to write one
+ * anonymous funnel event and then forgotten — nothing persists the link.
+ */
+export const completeCheckoutSchema = z.object({
+  analyticsSessionId: z.string().trim().uuid().optional(),
+});
+export type CompleteCheckoutInput = z.infer<typeof completeCheckoutSchema>;
 
 // ---------------------------------------------------------------------------
 // Orders

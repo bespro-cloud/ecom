@@ -13,6 +13,7 @@ import { AppException } from '../../common/errors/app-exception.js';
 import { AuditService } from '../audit/audit.service.js';
 import { CATALOGUE_AUDIT_ACTIONS } from '../catalogue/catalogue.audit.js';
 import type { ActorContext } from '../rbac/roles.service.js';
+import { RedirectsService } from '../growth/redirects/redirects.service.js';
 
 export interface PageView {
   id: string;
@@ -45,6 +46,7 @@ export class PagesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    private readonly redirects: RedirectsService,
     @Inject(CLOCK) private readonly clock: Clock,
   ) {}
 
@@ -175,6 +177,17 @@ export class PagesService {
 
     try {
       await this.prisma.$transaction(async (tx) => {
+        // Renaming a live page leaves its indexed URL behind, and a policy page
+        // is often the one somebody linked to from an email two years ago.
+        if (input.slug && input.slug !== existing.slug && isLive) {
+          await this.redirects.recordSlugChange(
+            tx,
+            `/pages/${existing.slug}`,
+            `/pages/${input.slug}`,
+            { reason: 'page', actor },
+          );
+        }
+
         await tx.page.update({
           where: { id },
           data: {

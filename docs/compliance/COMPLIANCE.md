@@ -456,6 +456,98 @@ Reviews are anonymised rather than deleted, because deleting them would silently
 change a published rating other customers rely on. The name comes off; the words
 stay.
 
+### Editorial content about products (built, Phase 6)
+
+A blog post that names a product is marketing copy about a regulated product.
+An article headlined "how magnesium supports restful sleep" that links to a
+magnesium product is making a claim about that product, and the fact that it is
+prose in a journal rather than a bullet on a listing is not a distinction a
+regulator draws.
+
+So a post that names a product goes through the **same sign-off a listing
+does**: `COMPLIANCE_APPROVE`, a second factor, and written reasoning. That
+permission is held by compliance reviewers and deliberately not by content
+staff, marketing, or `ADMIN` — a writer who could approve their own product
+claims is not a gate, it is a formality.
+
+A post that names **no** product publishes on the editor's own authority. This
+is a gate on claims about products, not a bureaucracy for every page.
+
+**The product list is declared by the writer, not detected from the prose.** A
+pattern match over an article deciding whether it is "about" a product would
+fail in the direction nobody notices: the post it missed is the one that
+publishes unreviewed claims. A person says what the post is about, and the
+reviewer reads the text regardless.
+
+**The approval is bound to the exact text.** The decision records a hash of the
+title, body and product list that was read; publishing recomputes it from what
+is actually going live and refuses a mismatch — in a database CHECK, so a direct
+`UPDATE` cannot get past it either. "A published post has an approval" is
+necessary and not sufficient: a post could be approved as a recipe and published
+as a disease claim.
+
+Editing a live post writes to a draft, so readers keep seeing the text that was
+approved while the unapproved edit waits for review. Decisions are append-only.
+
+Blog posts carry the same FDA disclaimer as product pages, in the same words.
+
+### Analytics and health-adjacent data (built, Phase 6)
+
+**What somebody browses on a supplements site is health-adjacent information
+about them.** A record that a named person looked at a menopause supplement, a
+fertility supplement or a sleep aid is, in substance, a health inference. The
+FTC has brought enforcement actions against health companies for precisely this
+kind of data reaching analytics vendors and advertisers, and the fact that the
+company called it "analytics" was not a defence.
+
+The measurement system is therefore built so the profile **cannot** be
+assembled, rather than merely not being assembled today:
+
+| Property                 | How it is guaranteed                                                                                                                                                                                                                    |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| No identity in analytics | No analytics table has a customer id, user id, email, order id or IP column. A database **event trigger fails any migration** that would add one.                                                                                       |
+| No IP address stored     | The address is an input to a salted hash inside one function and is then gone.                                                                                                                                                          |
+| No cross-day profile     | Visitor hashes use a salt that rotates every UTC day and is deleted with the events. Two days' hashes for one person are unrelated, and yesterday's cannot be recomputed from an IP by anyone — including someone holding the database. |
+| No query strings         | Discarded in full before a path is stored, not filtered. A CHECK refuses a stored path containing `?`.                                                                                                                                  |
+| No referrer paths        | Reduced to a host. A CHECK refuses a value containing `/`.                                                                                                                                                                              |
+| No fine-grained location | Two-letter country only; a CHECK enforces it. A city on a health site is a small crowd.                                                                                                                                                 |
+| No search terms          | `search_performed` records that a search happened, never what was typed. A search box on this site is where somebody types a symptom.                                                                                                   |
+| No free-form payload     | The event shape is a closed set of scalars. There is no field personal data could be put in.                                                                                                                                            |
+| Short retention          | Raw events, sessions and salts are deleted after 30 days. The surviving rollups are counts.                                                                                                                                             |
+
+**There is no third-party analytics, no pixel, no tag manager and no advertising
+identifier on the storefront.** That is not a gap to be filled in later.
+
+**Consent is opt-in, and browser-level signals beat it.** `Sec-GPC: 1` is
+honoured as a full opt-out from measurement — stricter than the letter of the
+CPRA, and far easier to defend than arguing about whether first-party
+measurement counts as "sharing". `DNT: 1` is honoured too, though it is not
+binding. A visitor who has not answered the banner has not agreed.
+
+**Conversion is measured without joining a person to their browsing.** An order
+carries denormalised campaign labels and no session identifier; conversion rate
+is orders-by-channel over sessions-by-channel. That one foreign key would
+reconstruct everything above, so it does not exist, and a test asserts the
+column is absent.
+
+**Measurement never fails a purchase.** Recording a conversion is wrapped so
+that an analytics failure cannot fail a checkout that already took money.
+
+### SEO and generated copy (built, Phase 6)
+
+Mechanical SEO is automated: sitemaps, canonical URLs, redirects on rename,
+structured data, and an audit that reports missing titles, missing descriptions,
+missing alternative text, duplicate titles and published pages excluded from the
+index.
+
+**No copy is generated, anywhere.** Not a meta description, not a title, not
+alternative text, not a snippet. A meta description for a supplement is a public
+statement about a health product, and a generated one is exactly the fluent,
+plausible sentence that ends up making a claim nobody reviewed and no evidence
+supports. The audit reports the gap and a person writes the words — and the
+admin screen says so, so nobody adds a "generate" button later without meeting
+the argument.
+
 ## What AI may and may not do (Phase 7)
 
 May: summarise approved evidence, draft content for human review, answer
@@ -479,7 +571,12 @@ worse than no answer.
   reason. There is no health-profile model in this schema, and that is
   deliberate.
 - Customer health information must never reach analytics, logs, AI prompts,
-  URLs, browser storage or error messages.
+  URLs, browser storage or error messages. From Phase 6 this is structural for
+  analytics rather than a rule to remember: the tables have no identity columns,
+  a database trigger refuses to let any be added, and query strings never reach
+  storage.
+- There is no third-party analytics, advertising pixel or tag manager on the
+  storefront, and adding one would defeat every guarantee above.
 - Consent history is retained as evidence and is not deleted by the application.
 
 ## Records to retain
@@ -519,3 +616,6 @@ out-of-band job. The application itself cannot delete these — see
 - [ ] Review moderators trained on what is and is not a disease claim
 - [ ] Auto-renewal disclosures reviewed by counsel against ROSCA and state law
 - [ ] Support staff trained to redirect clinical questions rather than answer them
+- [ ] Analytics practice reviewed by counsel against state privacy law, including GPC handling
+- [ ] Confirmed no third-party tag, pixel or advertising script has been added to the storefront
+- [ ] Blog authors and compliance reviewers trained on what makes a post a product claim

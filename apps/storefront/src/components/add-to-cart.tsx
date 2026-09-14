@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { Alert, Button } from '@health/ui';
 import { clientRequest, ClientApiError } from '@/lib/client';
+import { track } from '@/components/analytics';
 
 /**
  * Adding a product to the basket.
@@ -19,9 +20,12 @@ import { clientRequest, ClientApiError } from '@/lib/client';
  */
 export function AddToCart({
   variantId,
+  productId,
   availableQuantity,
 }: {
   variantId: string;
+  /** For the funnel. A product id, never a name: a name in a log is a sentence about a health product. */
+  productId: string;
   availableQuantity: number | null;
 }) {
   const router = useRouter();
@@ -39,6 +43,9 @@ export function AddToCart({
 
     try {
       await clientRequest('/api/v1/cart/items', { method: 'POST', body: { variantId, quantity } });
+      // After the basket actually changed, not on the click. A funnel that
+      // counted attempts would overstate every step above it.
+      track('add_to_cart', { productId, quantity });
       setAdded(true);
       // Refreshes the header count and anything else reading the basket.
       router.refresh();

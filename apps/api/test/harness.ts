@@ -17,7 +17,20 @@ export interface TestHarness {
 }
 
 const TRUNCATABLE = [
-  // Lifecycle first: these reference orders, products and customers below.
+  // Growth first: analytics events reference products, and blog reviews
+  // reference posts.
+  'analytics_events',
+  'analytics_sessions',
+  'analytics_product_daily',
+  'analytics_channel_daily',
+  'analytics_daily_metrics',
+  'analytics_salts',
+  'blog_post_reviews',
+  'blog_posts',
+  'blog_categories',
+  'redirects',
+
+  // Lifecycle next: these reference orders, products and customers below.
   'review_moderations',
   'product_reviews',
   'coupon_redemptions',
@@ -110,6 +123,7 @@ const APPEND_ONLY = [
   'coupon_redemptions',
   'subscription_events',
   'support_messages',
+  'blog_post_reviews',
 ];
 
 export async function createHarness(): Promise<TestHarness> {

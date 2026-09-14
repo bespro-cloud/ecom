@@ -207,3 +207,47 @@ export async function fetchConsentHistory(): Promise<ConsentRecord[]> {
   const response = await apiRequestOrSignIn<{ data: ConsentRecord[] }>('/api/v1/account/consents');
   return response.data;
 }
+
+// ---------------------------------------------------------------------------
+// Blog
+// ---------------------------------------------------------------------------
+
+const BLOG_REVALIDATE_SECONDS = 300;
+
+export interface BlogPostSummary {
+  id: string;
+  slug: string;
+  title: string;
+  excerpt: string | null;
+  publishedAt: string | null;
+  author: string;
+  category: { slug: string; name: string } | null;
+  heroImage: { url: string; altText: string; width: number | null; height: number | null } | null;
+}
+
+export interface BlogPostDetail extends BlogPostSummary {
+  blocks: unknown;
+  /**
+   * Products the post is about, resolved to published listings only.
+   *
+   * A post approved while a product was live stops linking to it once the
+   * listing is withdrawn. A withdrawn listing is usually withdrawn for a
+   * reason, and an article is not a back door to it.
+   */
+  products: Array<{ id: string; slug: string; name: string; priceCents: number }>;
+}
+
+export async function fetchBlogPosts(limit = 20): Promise<BlogPostSummary[]> {
+  const response = await apiRequest<{ data: BlogPostSummary[] }>(
+    `/api/v1/blog/posts?limit=${limit}`,
+    { forwardCookies: false, revalidate: BLOG_REVALIDATE_SECONDS },
+  );
+  return response.data;
+}
+
+export async function fetchBlogPost(slug: string): Promise<BlogPostDetail> {
+  return apiRequest<BlogPostDetail>(`/api/v1/blog/posts/${encodeURIComponent(slug)}`, {
+    forwardCookies: false,
+    revalidate: BLOG_REVALIDATE_SECONDS,
+  });
+}

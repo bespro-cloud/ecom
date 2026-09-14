@@ -1,6 +1,11 @@
 {
   "$schema": "https://turbo.build/schema.json",
-  "globalDependencies": [".env", "tsconfig.base.json"],
+  "globalDependencies": [
+    ".env",
+    "tsconfig.base.json",
+    "prisma/schema.prisma",
+    "prisma/migrations/**"
+  ],
   "globalEnv": ["NODE_ENV", "DATABASE_URL", "REDIS_URL"],
   "tasks": {
     "build": {

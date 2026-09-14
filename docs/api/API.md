@@ -852,6 +852,154 @@ not change until someone publishes, so saving a half-finished edit to the
 shipping policy does not change the shipping policy. The public read endpoint
 has no parameter that could return draft content.
 
+## Analytics
+
+| Endpoint                               | Permission       |
+| -------------------------------------- | ---------------- |
+| `POST /analytics/collect` · public     | —                |
+| `GET /admin/growth/analytics/overview` | `ANALYTICS_READ` |
+| `GET /admin/growth/analytics/channels` | `ANALYTICS_READ` |
+| `GET /admin/growth/analytics/products` | `ANALYTICS_READ` |
+
+**Nothing identifying is stored, and there is nowhere to store it.** No
+analytics table has a customer id, user id, email, order id or IP address. That
+is enforced by a database event trigger, not by convention: a migration adding
+`customer_id` to an analytics table fails.
+
+The reason is specific to this business. A record that a named person viewed a
+menopause supplement or a sleep aid is a health inference about them, and
+enforcement actions against health companies have turned on exactly that data
+reaching analytics vendors.
+
+**The collector refuses more than it accepts.**
+
+- The query string is discarded in full before a path is stored — not filtered,
+  discarded. A deny-list of parameter names loses the next time somebody adds
+  one, and here the thing that leaks could be a health detail.
+- `order_placed` cannot be reported by a browser. Conversions are written
+  server-side from real orders.
+- The event type is an allow-list, in the schema and in a database CHECK.
+- The body is `.strict()`: an unexpected field is a refusal, not a silently
+  ignored value somebody later assumes is stored.
+- Timestamps are clamped to arrival, so a client cannot backdate an event into a
+  closed rollup.
+- A referrer is reduced to a **host**; a CHECK refuses a stored value containing
+  `/`.
+- Location is a two-letter country and nothing finer.
+
+**Privacy signals beat consent.** `Sec-GPC: 1` and `DNT: 1` refuse collection
+even when the body says the visitor agreed — a browser-level opt-out is the more
+considered instruction, and GPC is legally binding under the CPRA. Consent
+itself is opt-in: silence is a no.
+
+The endpoint always answers `202` with an empty body, whether or not anything
+was recorded. Reporting the refusal would make it an oracle for probing which
+visitors are measured.
+
+**Visitor identity rotates daily.** A visitor hash is `sha256(daily salt, IP,
+user agent)`; the salt is generated per UTC day and deleted with the events it
+protected. The same person on two days is two visitors. Cross-day unique
+visitors therefore cannot be computed, and the reports say "visitors per day,
+summed" rather than implying otherwise.
+
+**Reporting reads rollups, never raw events.** Sessions and views come from the
+analytics rollups; orders and revenue come from the orders table; the two are
+joined on a day and a channel label. There is no endpoint that takes a customer
+id, because there is no query about an individual this system can answer.
+
+Raw events and sessions are deleted after 30 days, along with their salts. The
+rollups have no expiry: a count is not about anybody.
+
+## Conversion attribution
+
+An order carries `attributionChannel`, `attributionSource`, `attributionMedium`
+and `attributionCampaign` — denormalised labels copied from the checkout.
+
+**There is deliberately no session id on an order or a checkout.** An order
+names a customer; that single foreign key would join a named person to every
+page their visit viewed, which is what the analytics design exists to prevent.
+Campaign ROI is orders-by-channel divided by sessions-by-channel: an aggregate
+over an aggregate, which needs the labels and not the link.
+
+`POST /checkout/:id/complete` accepts an optional `analyticsSessionId`. It is
+used once, to write one anonymous funnel event, and then forgotten. It is not
+stored on the checkout — a checkout carries an email and becomes an order.
+
+## Blog
+
+| Endpoint                                      | Permission                 |
+| --------------------------------------------- | -------------------------- |
+| `GET /blog/posts` · public                    | —                          |
+| `GET /blog/posts/:slug` · public              | —                          |
+| `GET /blog/categories` · public               | —                          |
+| `GET /admin/growth/blog/posts`                | `BLOG_READ`                |
+| `GET /admin/growth/blog/posts/:id`            | `BLOG_READ`                |
+| `POST /admin/growth/blog/posts`               | `BLOG_WRITE`               |
+| `PATCH /admin/growth/blog/posts/:id`          | `BLOG_WRITE`               |
+| `POST /admin/growth/blog/posts/:id/submit`    | `BLOG_WRITE`               |
+| `POST /admin/growth/blog/posts/:id/review`    | `COMPLIANCE_APPROVE` + MFA |
+| `POST /admin/growth/blog/posts/:id/publish`   | `BLOG_PUBLISH`             |
+| `POST /admin/growth/blog/posts/:id/unpublish` | `BLOG_PUBLISH`             |
+
+**A post that names a product cannot be published by its author.** Editorial
+content on a site selling regulated products is marketing copy: an article
+headlined "how magnesium helps you sleep" that links to a magnesium product is
+making a claim about it. Those posts need `COMPLIANCE_APPROVE` — the same
+permission that signs off a product compliance review, held by compliance
+reviewers and deliberately not by content staff, marketing or `ADMIN`.
+
+A post that names **no** product publishes on the editor's own authority. The
+gate is on claims about products, not a bureaucracy for every page.
+
+**The product list is declared, not detected.** A regex over prose deciding
+whether an article is "about" a product would fail in the direction nobody
+notices — the post it missed is the one that publishes unreviewed claims.
+
+**An approval is of a specific text.** The decision stores a hash of the title,
+body and product list that was read, computed by the database. Publishing
+recomputes it from what is actually going live, in a CHECK. Approve a recipe and
+publish a disease claim and the write fails — including a direct `UPDATE`.
+Editing a live post writes to the draft, so readers keep seeing the approved
+text while the unapproved edit waits for review.
+
+Written reasoning is required on either outcome, and decisions are append-only:
+a trigger refuses `UPDATE` and `DELETE`.
+
+Linked products are resolved to **published** listings only, so a post stops
+linking to a product that was withdrawn after approval.
+
+## Redirects and SEO
+
+| Endpoint                             | Permission  |
+| ------------------------------------ | ----------- |
+| `POST /redirects/resolve` · public   | —           |
+| `GET /admin/growth/redirects`        | `SEO_READ`  |
+| `POST /admin/growth/redirects`       | `SEO_WRITE` |
+| `PATCH /admin/growth/redirects/:id`  | `SEO_WRITE` |
+| `DELETE /admin/growth/redirects/:id` | `SEO_WRITE` |
+| `GET /admin/growth/seo/audit`        | `SEO_READ`  |
+
+Renaming a published product, page or post writes a 301 **in the same
+transaction as the rename**. A rename that committed without its redirect is a
+silent 404 on a page that has been ranking for two years, and nobody notices
+until the traffic has gone.
+
+Loops are refused at any chain length — a loop is not a degraded experience, it
+is the page becoming unreachable — and a self-loop is refused by a CHECK.
+Renaming twice collapses `A → B → C` into `A → C` rather than extending a chain.
+An `http://` destination is refused: redirecting from a secure page to an
+insecure one is a downgrade, and a 301 makes it sticky in the browser.
+
+`GET /admin/growth/seo/audit` **reports only**. Nothing in this system generates
+a title, a meta description or alternative text. A meta description for a
+supplement is a public statement about a health product, and a generated one is
+exactly the plausible sentence that ends up claiming something nobody reviewed.
+The audit names the gap; a person writes the words.
+
+`GET /catalogue/sitemap` covers products, categories, pages and posts, and
+excludes anything marked `noindex` at the source — a sitemap must not contradict
+a page's own robots directive.
+
 ## Audit
 
 `GET /audit-logs` · `AUDIT_READ`
