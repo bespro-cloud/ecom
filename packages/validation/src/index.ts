@@ -6,3 +6,4 @@ export * from './catalogue.js';
 export * from './content.js';
 export * from './commerce.js';
 export * from './compliance.js';
+export * from './lifecycle.js';

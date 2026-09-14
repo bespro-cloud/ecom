@@ -8,7 +8,9 @@ import type { IssueRefundInput } from '@health/validation';
 import { PrismaService } from '../../../infrastructure/prisma/prisma.service.js';
 import { CLOCK } from '../../../infrastructure/config/config.module.js';
 import { AppException } from '../../../common/errors/app-exception.js';
+import { DOMAIN_EVENTS } from '@health/types';
 import { AuditService } from '../../audit/audit.service.js';
+import { OutboxService } from '../../../infrastructure/outbox/outbox.service.js';
 import { COMMERCE_AUDIT_ACTIONS } from '../commerce.audit.js';
 import { PaymentsService } from '../payments/payments.service.js';
 import { InventoryService } from '../inventory/inventory.service.js';
@@ -42,6 +44,7 @@ export class RefundsService {
     private readonly inventory: InventoryService,
     private readonly logger: PinoLogger,
     @Inject(CLOCK) private readonly clock: Clock,
+    private readonly outbox: OutboxService,
   ) {
     this.logger.setContext(RefundsService.name);
   }
@@ -263,6 +266,17 @@ export class RefundsService {
 
         await this.inventory.restock(tx, restockLines, 'RETURN', orderId, actor);
       }
+
+      // The customer is told their money is coming back, in the same
+      // transaction that credits it. A refund nobody was told about is a
+      // support ticket waiting to happen.
+      await this.outbox.publish(tx, {
+        aggregateType: 'order',
+        aggregateId: orderId,
+        eventType: DOMAIN_EVENTS.REFUND_ISSUED,
+        payload: { amountCents, reason: input.reason },
+        correlationId: actor.correlationId,
+      });
 
       await this.audit.recordIn(tx, {
         action: COMMERCE_AUDIT_ACTIONS.REFUND_ISSUED,

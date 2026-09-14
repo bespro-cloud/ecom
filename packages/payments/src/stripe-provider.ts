@@ -8,6 +8,7 @@ import {
   type PaymentEventType,
   type PaymentIntentResult,
   type PaymentIntentStatus,
+  type PaymentMethodDetails,
   type PaymentProvider,
   type RefundPaymentInput,
   type RefundResult,
@@ -83,6 +84,22 @@ export class StripePaymentProvider implements PaymentProvider {
     });
 
     if (input.email) body.set('receipt_email', input.email);
+
+    // An off-session charge against a saved method: a subscription renewal.
+    // `automatic_payment_methods` and an explicit payment method are mutually
+    // exclusive at Stripe, so the former is removed rather than sent alongside.
+    if (input.paymentMethodId) {
+      body.delete('automatic_payment_methods[enabled]');
+      body.set('payment_method', input.paymentMethodId);
+      body.set('confirm', 'true');
+      if (input.offSession) {
+        // Tells Stripe nobody is at the keyboard, so it declines cleanly
+        // instead of returning a status that waits for an authentication no
+        // one can complete.
+        body.set('off_session', 'true');
+      }
+    }
+
     body.set('metadata[reference]', input.reference);
     for (const [key, value] of Object.entries(input.metadata ?? {})) {
       body.set(`metadata[${key}]`, value);
@@ -93,6 +110,36 @@ export class StripePaymentProvider implements PaymentProvider {
     });
 
     return toIntentResult(intent);
+  }
+
+  /**
+   * Looks up a saved payment method for its display strings.
+   *
+   * A 404 is an ordinary outcome — the customer detached the card at the
+   * provider — so it returns null rather than throwing. Anything else is a real
+   * failure and propagates.
+   */
+  async retrievePaymentMethod(
+    providerPaymentMethodId: string,
+  ): Promise<PaymentMethodDetails | null> {
+    try {
+      const method = await this.request<StripePaymentMethod>(
+        'GET',
+        `/payment_methods/${encodeURIComponent(providerPaymentMethodId)}`,
+      );
+      return {
+        providerPaymentMethodId: method.id,
+        cardBrand: method.card?.brand ?? null,
+        cardLast4: method.card?.last4 ?? null,
+        expiryMonth: method.card?.exp_month ?? null,
+        expiryYear: method.card?.exp_year ?? null,
+      };
+    } catch (error) {
+      if (error instanceof PaymentProviderError && error.code === 'resource_missing') {
+        return null;
+      }
+      throw error;
+    }
   }
 
   async retrieveIntent(providerPaymentId: string): Promise<PaymentIntentResult> {
@@ -394,6 +441,16 @@ function normaliseEvent(event: StripeEvent): PaymentEvent {
 interface StripeCard {
   brand?: string;
   last4?: string;
+}
+
+interface StripePaymentMethod {
+  id: string;
+  card?: {
+    brand?: string;
+    last4?: string;
+    exp_month?: number;
+    exp_year?: number;
+  };
 }
 
 interface StripePaymentIntent {

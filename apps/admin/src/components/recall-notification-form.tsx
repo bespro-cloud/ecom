@@ -13,10 +13,11 @@ import { ClientApiError, clientRequest } from '@/lib/client';
  * because this is not a decision anyone should reach by clicking through
  * screens — and a checkbox is exactly how that happens.
  *
- * It is also honest about what approving does. It does not send anything. There
- * is no transactional email in this platform, and this phase adds none:
- * approving unlocks the affected-customer list and records who unlocked it and
- * on what basis. Telling people remains a deliberate act performed by a person.
+ * It is also honest about what approving does. It does not send anything. The
+ * platform has transactional email and recall notification is deliberately not
+ * wired to it: approving unlocks the affected-customer list and records who
+ * unlocked it and on what basis. Telling people remains a deliberate act
+ * performed by a person who can answer the questions it will produce.
  */
 
 const ACKNOWLEDGEMENT = 'I approve contacting affected customers';
@@ -107,9 +108,10 @@ export function RecallNotificationForm({
       </Alert>
 
       <Alert tone="info" title="Approving does not send anything">
-        This system contacts nobody. There is no transactional email here yet, and approving adds
-        none. It unlocks the list and records the decision; reaching out to customers remains a
-        manual act.
+        Approving contacts nobody. Recall notification is deliberately not wired to the
+        transactional email the platform does have. It unlocks the list and records the decision;
+        reaching out to customers remains a manual act performed by a person who can answer the
+        questions it will produce.
       </Alert>
 
       <TextareaField

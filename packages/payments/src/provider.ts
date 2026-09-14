@@ -41,6 +41,27 @@ export interface CreatePaymentIntent {
   idempotencyKey: string;
   /** Small, non-sensitive key/value context. Never customer health data. */
   metadata?: Record<string, string>;
+
+  /**
+   * A previously saved payment method, for charging without the customer
+   * present — a subscription renewal.
+   *
+   * This is a provider token, exactly like everything else here. It is not a
+   * card, cannot be turned back into one, and is useless outside the
+   * provider's own account.
+   */
+  paymentMethodId?: string;
+
+  /**
+   * True when nobody is at the keyboard.
+   *
+   * Providers treat off-session charges differently: they cannot prompt for
+   * 3-D Secure, and the issuer's liability rules change. Saying so explicitly
+   * is what lets the provider decline cleanly rather than hanging on an
+   * authentication nobody can complete — and a renewal that silently required
+   * authentication would just fail, repeatedly, at 3am.
+   */
+  offSession?: boolean;
 }
 
 export interface PaymentIntentResult {
@@ -136,6 +157,16 @@ export class WebhookSignatureError extends Error {
   }
 }
 
+/** A saved payment method, as the provider describes it. */
+export interface PaymentMethodDetails {
+  providerPaymentMethodId: string;
+  /** Display only. Never enough to charge anything. */
+  cardBrand: string | null;
+  cardLast4: string | null;
+  expiryMonth: number | null;
+  expiryYear: number | null;
+}
+
 export interface PaymentProvider {
   readonly name: string;
   /**
@@ -161,4 +192,17 @@ export interface PaymentProvider {
    * mark orders as paid.
    */
   verifyAndParseWebhook(rawBody: string, signatureHeader: string): PaymentEvent;
+
+  /**
+   * Looks up a saved payment method so its brand and last four can be shown.
+   *
+   * The application stores those strings for display, but asks the provider
+   * for them rather than accepting them from the browser: a client that could
+   * tell the server "this token is a Visa ending 4242" could label somebody
+   * else's saved card however it liked.
+   *
+   * Returns null when the token is unknown, rather than throwing, because "the
+   * customer removed this at the provider" is an ordinary state.
+   */
+  retrievePaymentMethod(providerPaymentMethodId: string): Promise<PaymentMethodDetails | null>;
 }

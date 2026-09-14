@@ -142,6 +142,11 @@ export class OutboxDispatcherService implements OnModuleDestroy {
  *
  * Unknown events go to the analytics queue rather than being dropped: an event
  * nobody consumes yet is still evidence that something happened.
+ *
+ * The email list is account and staff events plus the transactional commerce
+ * and lifecycle ones. Every entry has a renderer in `EmailProcessor`: routing
+ * an event here that the processor cannot render dead-letters the job, so the
+ * two have to stay in step, and a unit test asserts that they do.
  */
 export function queueForEvent(eventType: string): QueueName {
   switch (eventType) {
@@ -154,6 +159,13 @@ export function queueForEvent(eventType: string): QueueName {
     case DOMAIN_EVENTS.USER_LOCKED_OUT:
     case DOMAIN_EVENTS.STAFF_INVITED:
     case DOMAIN_EVENTS.STAFF_ROLES_CHANGED:
+    case DOMAIN_EVENTS.ORDER_PLACED:
+    case DOMAIN_EVENTS.ORDER_CANCELLED:
+    case DOMAIN_EVENTS.PAYMENT_FAILED:
+    case DOMAIN_EVENTS.REFUND_ISSUED:
+    case DOMAIN_EVENTS.SUBSCRIPTION_RENEWAL_FAILED:
+    case DOMAIN_EVENTS.SUBSCRIPTION_UNPAID:
+    case DOMAIN_EVENTS.SUPPORT_REPLIED:
       return 'email';
     default:
       return 'analytics';

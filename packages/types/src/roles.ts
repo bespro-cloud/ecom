@@ -62,6 +62,7 @@ export const SYSTEM_ROLES: readonly SystemRoleDefinition[] = [
       'ROLE_READ',
       'CUSTOMER_READ',
       'CUSTOMER_WRITE',
+      'CUSTOMER_ERASE',
       'PRODUCT_READ',
       'PRODUCT_WRITE',
       'CATEGORY_READ',

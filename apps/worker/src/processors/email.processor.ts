@@ -14,7 +14,14 @@ import {
   passwordChangedEmail,
   passwordResetEmail,
   staffInviteEmail,
+  orderCancelledEmail,
+  orderPlacedEmail,
+  paymentFailedEmail,
+  refundIssuedEmail,
   staffRolesChangedEmail,
+  subscriptionRenewalFailedEmail,
+  subscriptionUnpaidEmail,
+  supportRepliedEmail,
   welcomeEmail,
   type EmailMessage,
   type EmailProvider,
@@ -156,7 +163,23 @@ export class EmailProcessor implements OnModuleInit, OnModuleDestroy {
     };
   }
 
+  /**
+   * Turns an event into a message, or into nothing.
+   *
+   * Split by aggregate because the recipient is found differently: an account
+   * event addresses the user row it names, while an order event addresses the
+   * email captured on the order — which may be a guest who has no account at
+   * all. Looking up a user for an order event would drop every guest's
+   * confirmation.
+   */
   private async render(job: OutboxJob): Promise<EmailMessage | null> {
+    if (job.aggregateType === 'order') return this.renderOrderEmail(job);
+    if (job.aggregateType === 'subscription') return this.renderSubscriptionEmail(job);
+    if (job.aggregateType === 'support_thread') return this.renderSupportEmail(job);
+    return this.renderAccountEmail(job);
+  }
+
+  private async renderAccountEmail(job: OutboxJob): Promise<EmailMessage | null> {
     const user = await this.prisma.user.findUnique({
       where: { id: job.aggregateId },
       select: { email: true, firstName: true },
@@ -210,5 +233,144 @@ export class EmailProcessor implements OnModuleInit, OnModuleDestroy {
       default:
         return null;
     }
+  }
+
+  /**
+   * Order mail.
+   *
+   * Reads the order rather than trusting the event payload for anything a
+   * customer will see: the payload is a snapshot from when the event was
+   * written, and a confirmation quoting a total that has since been corrected
+   * is worse than one that is a second late.
+   */
+  private async renderOrderEmail(job: OutboxJob): Promise<EmailMessage | null> {
+    const order = await this.prisma.order.findUnique({
+      where: { id: job.aggregateId },
+      include: { items: { orderBy: { createdAt: 'asc' } } },
+    });
+    if (!order) {
+      this.logger.warn({ orderId: job.aggregateId }, 'skipping email for missing order');
+      return null;
+    }
+
+    const context = this.templateContext;
+    const firstName = (order.shippingAddress as { firstName?: string } | null)?.firstName ?? null;
+
+    switch (job.eventType) {
+      case DOMAIN_EVENTS.ORDER_PLACED:
+        return orderPlacedEmail(context, {
+          to: order.email,
+          firstName,
+          reference: order.reference,
+          currency: order.currency,
+          lines: order.items.map((item) => ({
+            productName: item.productName,
+            variantName: item.variantName,
+            quantity: item.quantity,
+            lineTotalCents: item.lineTotalCents,
+          })),
+          subtotalCents: order.subtotalCents,
+          discountCents: order.discountCents,
+          shippingCents: order.shippingCents,
+          taxCents: order.taxCents,
+          totalCents: order.totalCents,
+          orderUrl: `${context.storefrontUrl}/orders/${order.id}`,
+        });
+
+      case DOMAIN_EVENTS.ORDER_CANCELLED:
+        return orderCancelledEmail(context, {
+          to: order.email,
+          firstName,
+          reference: order.reference,
+          refunded: order.amountRefundedCents > 0,
+        });
+
+      case DOMAIN_EVENTS.PAYMENT_FAILED:
+        return paymentFailedEmail(context, {
+          to: order.email,
+          firstName,
+          reference: order.reference,
+          checkoutUrl: `${context.storefrontUrl}/checkout`,
+        });
+
+      case DOMAIN_EVENTS.REFUND_ISSUED:
+        return refundIssuedEmail(context, {
+          to: order.email,
+          firstName,
+          reference: order.reference,
+          currency: order.currency,
+          amountCents: Number(job.payload.amountCents ?? 0),
+        });
+
+      default:
+        return null;
+    }
+  }
+
+  private async renderSubscriptionEmail(job: OutboxJob): Promise<EmailMessage | null> {
+    const subscription = await this.prisma.subscription.findUnique({
+      where: { id: job.aggregateId },
+      include: { customer: { include: { user: { select: { email: true, firstName: true } } } } },
+    });
+    if (!subscription) {
+      this.logger.warn(
+        { subscriptionId: job.aggregateId },
+        'skipping email for missing subscription',
+      );
+      return null;
+    }
+
+    const context = this.templateContext;
+    const manageUrl = `${context.storefrontUrl}/account/subscriptions`;
+    const to = subscription.customer.user.email;
+    const firstName = subscription.customer.user.firstName;
+
+    switch (job.eventType) {
+      case DOMAIN_EVENTS.SUBSCRIPTION_RENEWAL_FAILED:
+        return subscriptionRenewalFailedEmail(context, {
+          to,
+          firstName,
+          reference: subscription.reference,
+          nextAttemptAt: subscription.nextBillingAt,
+          manageUrl,
+        });
+      case DOMAIN_EVENTS.SUBSCRIPTION_UNPAID:
+        return subscriptionUnpaidEmail(context, {
+          to,
+          firstName,
+          reference: subscription.reference,
+          manageUrl,
+        });
+      default:
+        return null;
+    }
+  }
+
+  /**
+   * Support mail carries a link and no message body.
+   *
+   * A support reply can contain anything an agent typed. Email is the least
+   * controlled channel in the system, so the customer comes back to the site
+   * to read it rather than receiving a copy in their inbox.
+   */
+  private async renderSupportEmail(job: OutboxJob): Promise<EmailMessage | null> {
+    const thread = await this.prisma.supportThread.findUnique({
+      where: { id: job.aggregateId },
+      include: { customer: { include: { user: { select: { email: true, firstName: true } } } } },
+    });
+    if (!thread) {
+      this.logger.warn({ threadId: job.aggregateId }, 'skipping email for missing conversation');
+      return null;
+    }
+
+    if (job.eventType !== DOMAIN_EVENTS.SUPPORT_REPLIED) return null;
+
+    const context = this.templateContext;
+    return supportRepliedEmail(context, {
+      to: thread.customer.user.email,
+      firstName: thread.customer.user.firstName,
+      reference: thread.reference,
+      threadUrl: `${context.storefrontUrl}/account/support/${thread.id}`,
+    });
   }
 }

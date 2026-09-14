@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { allocateCents } from './commerce.js';
-import { priceOrder, pricingFingerprint, PricingError, type PricingLineInput } from './pricing.js';
+import {
+  priceOrder,
+  pricingFingerprint,
+  PricingError,
+  quoteShippingRates,
+  type PricingLineInput,
+  type ShippingRateRule,
+} from './pricing.js';
 
 /**
  * The pricing engine decides what a customer is charged, so these tests are
@@ -437,5 +444,88 @@ describe('pricingFingerprint', () => {
 
   it('is a fixed-width hex string', () => {
     expect(pricingFingerprint(basket)).toMatch(/^[0-9a-f]{16}$/);
+  });
+});
+
+describe('quoteShippingRates', () => {
+  const standard: ShippingRateRule = {
+    code: 'standard',
+    name: 'Standard',
+    description: null,
+    countries: ['US'],
+    regions: [],
+    priceCents: 599,
+    freeAboveSubtotalCents: null,
+    minWeightGrams: null,
+    maxWeightGrams: null,
+    minSubtotalCents: null,
+    maxSubtotalCents: null,
+    estimatedDaysMin: 3,
+    estimatedDaysMax: 5,
+  };
+
+  const context = { country: 'US', region: 'CA', subtotalCents: 5000, totalWeightGrams: 400 };
+
+  it('quotes a rate whose country matches', () => {
+    expect(quoteShippingRates([standard], context)).toEqual([
+      {
+        code: 'standard',
+        name: 'Standard',
+        description: null,
+        priceCents: 599,
+        estimatedDaysMin: 3,
+        estimatedDaysMax: 5,
+      },
+    ]);
+  });
+
+  it('excludes a rate for another country', () => {
+    expect(quoteShippingRates([standard], { ...context, country: 'CA' })).toEqual([]);
+  });
+
+  it('treats an empty region list as the whole country', () => {
+    expect(quoteShippingRates([standard], { ...context, region: 'NY' })).toHaveLength(1);
+  });
+
+  it('treats a non-empty region list as an allow-list', () => {
+    const rate = { ...standard, regions: ['CA', 'OR'] };
+    expect(quoteShippingRates([rate], { ...context, region: 'CA' })).toHaveLength(1);
+    expect(quoteShippingRates([rate], { ...context, region: 'NY' })).toHaveLength(0);
+  });
+
+  it('prices a rate at zero above its free-shipping threshold', () => {
+    const rate = { ...standard, freeAboveSubtotalCents: 5000 };
+    expect(quoteShippingRates([rate], context)[0]?.priceCents).toBe(0);
+    // Strictly below the threshold still pays.
+    expect(quoteShippingRates([rate], { ...context, subtotalCents: 4999 })[0]?.priceCents).toBe(
+      599,
+    );
+  });
+
+  it('applies weight and subtotal bounds inclusively', () => {
+    const bounded = {
+      ...standard,
+      minWeightGrams: 400,
+      maxWeightGrams: 1000,
+      minSubtotalCents: 5000,
+      maxSubtotalCents: 10000,
+    };
+    expect(quoteShippingRates([bounded], context)).toHaveLength(1);
+    expect(quoteShippingRates([bounded], { ...context, totalWeightGrams: 399 })).toHaveLength(0);
+    expect(quoteShippingRates([bounded], { ...context, totalWeightGrams: 1001 })).toHaveLength(0);
+    expect(quoteShippingRates([bounded], { ...context, subtotalCents: 4999 })).toHaveLength(0);
+    expect(quoteShippingRates([bounded], { ...context, subtotalCents: 10001 })).toHaveLength(0);
+  });
+
+  it('preserves the order it was given, so the caller controls precedence', () => {
+    const express = { ...standard, code: 'express', name: 'Express', priceCents: 1499 };
+    expect(quoteShippingRates([express, standard], context).map((q) => q.code)).toEqual([
+      'express',
+      'standard',
+    ]);
+  });
+
+  it('returns nothing rather than inventing a fallback when no rate applies', () => {
+    expect(quoteShippingRates([], context)).toEqual([]);
   });
 });

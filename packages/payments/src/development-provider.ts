@@ -6,6 +6,7 @@ import {
   type CreatePaymentIntent,
   type PaymentEvent,
   type PaymentIntentResult,
+  type PaymentMethodDetails,
   type PaymentProvider,
   type RefundPaymentInput,
   type RefundResult,
@@ -50,6 +51,14 @@ export const DEV_REQUIRES_ACTION_CENTS = 3_00;
  * trigger eventually fires on a test — or a demo — that meant nothing by it.
  */
 export const DEV_REFUND_FAIL_ONCE_MARKER = 'dev-fail-once';
+
+/**
+ * A saved payment method whose off-session charges always decline.
+ *
+ * Renewals failing is the case that matters most in a subscription system and
+ * the hardest to reach by hand, so there is a token that reliably produces it.
+ */
+export const DEV_DECLINING_PAYMENT_METHOD = 'dev_pm_declines';
 
 interface DevIntent {
   id: string;
@@ -117,18 +126,25 @@ export class DevelopmentPaymentProvider implements PaymentProvider {
       );
     }
 
+    // An off-session charge against a saved method settles (or declines)
+    // immediately, because there is no browser to hand a client secret to.
+    // That asymmetry is real, not a shortcut: a renewal either collects or it
+    // does not, and there is nobody to complete an authentication.
+    const offSession = input.offSession === true && input.paymentMethodId !== undefined;
+    const declines = input.paymentMethodId === DEV_DECLINING_PAYMENT_METHOD;
+
     const intent: DevIntent = {
       id: `dev_pi_${randomUUID().replace(/-/g, '')}`,
       amountCents: input.amountCents,
       currency: input.currency.toUpperCase(),
-      capturedCents: 0,
+      capturedCents: offSession && !declines ? input.amountCents : 0,
       refundedCents: 0,
       reference: input.reference,
-      // Always starts unpaid. A provider that returned "captured" from its own
-      // create call would be modelling a flow that does not exist.
-      status: 'REQUIRES_PAYMENT',
-      failureCode: null,
-      failureMessage: null,
+      // On-session always starts unpaid. A provider that returned "captured"
+      // from its own create call would be modelling a flow that does not exist.
+      status: offSession ? (declines ? 'FAILED' : 'CAPTURED') : 'REQUIRES_PAYMENT',
+      failureCode: offSession && declines ? 'card_declined' : null,
+      failureMessage: offSession && declines ? 'The saved card was declined.' : null,
     };
 
     this.intents.set(intent.id, intent);
@@ -138,6 +154,27 @@ export class DevelopmentPaymentProvider implements PaymentProvider {
 
   async retrieveIntent(providerPaymentId: string): Promise<PaymentIntentResult> {
     return this.toResult(this.require(providerPaymentId));
+  }
+
+  /**
+   * Describes a saved payment method.
+   *
+   * Invents nothing beyond what a stand-in has to: a fixed brand and last four
+   * so the account screen has something to render. It does not fabricate an
+   * expiry date, because a plausible-looking one would let a renewal reminder
+   * tell a customer their card expires on a date that is not real.
+   */
+  async retrievePaymentMethod(
+    providerPaymentMethodId: string,
+  ): Promise<PaymentMethodDetails | null> {
+    if (!providerPaymentMethodId.startsWith('dev_pm_')) return null;
+    return {
+      providerPaymentMethodId,
+      cardBrand: 'devcard',
+      cardLast4: '0000',
+      expiryMonth: null,
+      expiryYear: null,
+    };
   }
 
   /**

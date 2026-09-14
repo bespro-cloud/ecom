@@ -17,7 +17,21 @@ export interface TestHarness {
 }
 
 const TRUNCATABLE = [
-  // Compliance first: recall lots reference batches, and claim rows reference
+  // Lifecycle first: these reference orders, products and customers below.
+  'review_moderations',
+  'product_reviews',
+  'coupon_redemptions',
+  'coupons',
+  'subscription_invoices',
+  'subscription_events',
+  'subscription_items',
+  'subscriptions',
+  'customer_payment_methods',
+  'support_messages',
+  'support_threads',
+  'erasure_requests',
+
+  // Compliance next: recall lots reference batches, and claim rows reference
   // the products further down.
   'recall_actions',
   'recall_lots',
@@ -92,6 +106,10 @@ const APPEND_ONLY = [
   'batch_events',
   'recall_actions',
   'recall_lots',
+  'review_moderations',
+  'coupon_redemptions',
+  'subscription_events',
+  'support_messages',
 ];
 
 export async function createHarness(): Promise<TestHarness> {
@@ -181,6 +199,61 @@ export interface SignedInStaff {
  * including MFA where the role requires it, which is the only way such a
  * session becomes privileged enough to do anything interesting.
  */
+/**
+ * A signed-in customer, with their `Customer` record.
+ *
+ * Created through Prisma rather than the registration endpoint: these tests are
+ * about the lifecycle, and walking email verification for each one would make
+ * the suite about Phase 1 instead.
+ */
+export async function signedInCustomer(
+  harness: TestHarness,
+  email = `customer-${Math.random().toString(36).slice(2, 8)}@example.test`,
+): Promise<SignedInCustomer> {
+  const role = await harness.prisma.role.findUniqueOrThrow({ where: { key: 'CUSTOMER' } });
+  const user = await harness.prisma.user.create({
+    data: {
+      email,
+      emailNormalized: email.toLowerCase(),
+      passwordHash: await hashPassword(STRONG_PASSWORD),
+      passwordAlgorithm: PASSWORD_ALGORITHM_ID,
+      passwordUpdatedAt: new Date(),
+      firstName: 'Ada',
+      lastName: 'Lovelace',
+      type: 'CUSTOMER',
+      status: 'ACTIVE',
+      emailVerifiedAt: new Date(),
+      roles: { create: { roleId: role.id } },
+    },
+  });
+
+  const customer = await harness.prisma.customer.create({
+    data: {
+      userId: user.id,
+      reference: `CUS-${Math.random().toString(36).slice(2, 8).toUpperCase()}`,
+    },
+  });
+
+  const login = await harness
+    .http()
+    .post('/api/v1/auth/login')
+    .send({ email, password: STRONG_PASSWORD });
+
+  return {
+    userId: user.id,
+    customerId: customer.id,
+    email,
+    token: login.body.accessToken as string,
+  };
+}
+
+export interface SignedInCustomer {
+  userId: string;
+  customerId: string;
+  email: string;
+  token: string;
+}
+
 export async function signedInStaff(
   harness: TestHarness,
   roleKey: string,

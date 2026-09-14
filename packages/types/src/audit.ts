@@ -164,11 +164,53 @@ export const COMPLIANCE_AUDIT_ACTIONS = {
   RECALL_CANCELLED: 'recall.cancelled',
 } as const;
 
+/**
+ * Customer-lifecycle actions.
+ *
+ * Review moderation is the one worth surfacing unprompted: publishing a review
+ * puts customer-written text about a health product on a public listing, and
+ * that is a decision someone may need to account for later.
+ */
+export const LIFECYCLE_AUDIT_ACTIONS = {
+  REVIEW_SUBMITTED: 'review.submitted',
+  REVIEW_PUBLISHED: 'review.published',
+  REVIEW_REJECTED: 'review.rejected',
+  REVIEW_ESCALATED: 'review.escalated',
+  REVIEW_WITHDRAWN: 'review.withdrawn',
+  REVIEW_ADVERSE_EVENT_FLAGGED: 'review.adverse_event.flagged',
+
+  COUPON_CREATED: 'coupon.created',
+  COUPON_UPDATED: 'coupon.updated',
+  COUPON_REDEEMED: 'coupon.redeemed',
+
+  PAYMENT_METHOD_ATTACHED: 'payment_method.attached',
+  PAYMENT_METHOD_DETACHED: 'payment_method.detached',
+
+  SUBSCRIPTION_CREATED: 'subscription.created',
+  SUBSCRIPTION_RENEWED: 'subscription.renewed',
+  SUBSCRIPTION_RENEWAL_FAILED: 'subscription.renewal.failed',
+  SUBSCRIPTION_PAUSED: 'subscription.paused',
+  SUBSCRIPTION_RESUMED: 'subscription.resumed',
+  SUBSCRIPTION_CANCELLED: 'subscription.cancelled',
+  SUBSCRIPTION_UNPAID: 'subscription.unpaid',
+
+  SUPPORT_THREAD_OPENED: 'support.thread.opened',
+  SUPPORT_REPLIED: 'support.replied',
+  SUPPORT_STATUS_CHANGED: 'support.status.changed',
+
+  MARKETING_PREFERENCES_CHANGED: 'account.marketing.changed',
+  DATA_EXPORTED: 'account.data.exported',
+  ERASURE_REQUESTED: 'account.erasure.requested',
+  ERASURE_COMPLETED: 'account.erasure.completed',
+  ERASURE_REFUSED: 'account.erasure.refused',
+} as const;
+
 export const ALL_AUDIT_ACTIONS = {
   ...AUDIT_ACTIONS,
   ...CATALOGUE_AUDIT_ACTIONS,
   ...COMMERCE_AUDIT_ACTIONS,
   ...COMPLIANCE_AUDIT_ACTIONS,
+  ...LIFECYCLE_AUDIT_ACTIONS,
 } as const;
 
 export type AuditAction = (typeof ALL_AUDIT_ACTIONS)[keyof typeof ALL_AUDIT_ACTIONS];
@@ -218,4 +260,11 @@ export const NOTABLE_AUDIT_ACTIONS: readonly AuditAction[] = [
   // looking for.
   COMPLIANCE_AUDIT_ACTIONS.RECALL_NOTIFICATION_APPROVED,
   COMPLIANCE_AUDIT_ACTIONS.RECALL_REGULATOR_NOTIFIED,
+  // Publishing a review puts customer-written text about a health product on a
+  // public listing. Escalation and adverse-event flags are safety signals.
+  LIFECYCLE_AUDIT_ACTIONS.REVIEW_PUBLISHED,
+  LIFECYCLE_AUDIT_ACTIONS.REVIEW_ESCALATED,
+  LIFECYCLE_AUDIT_ACTIONS.REVIEW_ADVERSE_EVENT_FLAGGED,
+  LIFECYCLE_AUDIT_ACTIONS.SUBSCRIPTION_RENEWAL_FAILED,
+  LIFECYCLE_AUDIT_ACTIONS.ERASURE_COMPLETED,
 ];

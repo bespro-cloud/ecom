@@ -11,6 +11,7 @@ import { EmailProcessor } from './processors/email.processor.js';
 import { MaintenanceService } from './processors/maintenance.service.js';
 import { CommerceMaintenanceService } from './processors/commerce-maintenance.service.js';
 import { ComplianceMaintenanceService } from './processors/compliance-maintenance.service.js';
+import { SubscriptionBillingService } from './processors/subscription-billing.service.js';
 import { WorkerHealthController } from './health/health.controller.js';
 
 @Module({
@@ -44,6 +45,7 @@ import { WorkerHealthController } from './health/health.controller.js';
     MaintenanceService,
     CommerceMaintenanceService,
     ComplianceMaintenanceService,
+    SubscriptionBillingService,
   ],
 })
 export class WorkerModule {}

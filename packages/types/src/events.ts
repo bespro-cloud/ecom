@@ -13,6 +13,22 @@ export const DOMAIN_EVENTS = {
   USER_LOCKED_OUT: 'user.locked_out.v1',
   STAFF_INVITED: 'staff.invited.v1',
   STAFF_ROLES_CHANGED: 'staff.roles_changed.v1',
+
+  /**
+   * Commerce lifecycle.
+   *
+   * Transactional, every one of them: a customer cannot unsubscribe from being
+   * told their order was placed or their card was declined, and none of these
+   * is gated on a marketing consent check. Marketing mail is a different path
+   * and does check.
+   */
+  ORDER_PLACED: 'order.placed.v1',
+  ORDER_CANCELLED: 'order.cancelled.v1',
+  PAYMENT_FAILED: 'payment.failed.v1',
+  REFUND_ISSUED: 'refund.issued.v1',
+  SUBSCRIPTION_RENEWAL_FAILED: 'subscription.renewal_failed.v1',
+  SUBSCRIPTION_UNPAID: 'subscription.unpaid.v1',
+  SUPPORT_REPLIED: 'support.replied.v1',
 } as const;
 
 export type DomainEventName = (typeof DOMAIN_EVENTS)[keyof typeof DOMAIN_EVENTS];

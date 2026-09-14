@@ -11,6 +11,7 @@ import { parseAttributeFilters } from '../search/query-parser.js';
 import { PrismaService } from '../../../infrastructure/prisma/prisma.service.js';
 import { InventoryService } from '../../commerce/inventory/inventory.service.js';
 import { AppException } from '../../../common/errors/app-exception.js';
+import { ReviewsService } from '../../lifecycle/reviews/reviews.service.js';
 import { MediaUrlService } from '../../media/media-url.service.js';
 import { SEARCH_PROVIDER, type SearchFacets, type SearchProvider } from '../search/search.types.js';
 
@@ -34,6 +35,7 @@ export class CatalogueService {
     private readonly inventory: InventoryService,
     private readonly logger: PinoLogger,
     @Inject(SEARCH_PROVIDER) private readonly search: SearchProvider,
+    private readonly reviews: ReviewsService,
   ) {
     this.logger.setContext(CatalogueService.name);
   }
@@ -140,6 +142,11 @@ export class CatalogueService {
     const availability = await this.inventory.availability(
       product.variants.map((variant) => variant.id),
     );
+
+    // Published reviews only, and the rating aggregate over the same set. The
+    // service does the filtering; there is no parameter here that could widen
+    // it to reviews nobody has moderated.
+    const reviews = await this.reviews.publishedFor(product.id);
 
     const inheritedWarnings = product.ingredients.flatMap((entry) =>
       entry.ingredient.warnings.map((warning) => ({
@@ -252,6 +259,7 @@ export class CatalogueService {
         source: warning.source,
       })),
       allergens,
+      reviews,
       claims: product.claims
         // Belt and braces: an APPROVED claim always has an approved version —
         // a database CHECK enforces it — but rendering `undefined` as a health
@@ -488,6 +496,24 @@ export interface PublicProductDetail {
    * filters on status and reads the approved version, not the current one.
    */
   claims: Array<{ type: string; text: string }>;
+  /** Published reviews, and the rating summary computed over those alone. */
+  reviews: {
+    reviews: Array<{
+      id: string;
+      rating: number;
+      title: string | null;
+      body: string;
+      authorDisplayName: string;
+      verifiedPurchase: boolean;
+      publishedAt: Date | null;
+    }>;
+    summary: {
+      count: number;
+      /** Null when there are none. Zero is not a rating anyone can give. */
+      average: number | null;
+      distribution: Record<number, number>;
+    };
+  };
   disclaimers: Array<{ kind: string; text: string }>;
   seo: {
     title: string;

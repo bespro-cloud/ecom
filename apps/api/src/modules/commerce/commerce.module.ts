@@ -15,6 +15,7 @@ import { PaymentWebhooksController } from './payments/webhooks.controller.js';
 import { RefundsService } from './refunds/refunds.service.js';
 import { ShippingService } from './shipping/shipping.service.js';
 import { CommerceAdminController } from './commerce.controller.js';
+import { CouponsService } from '../lifecycle/coupons/coupons.service.js';
 
 /**
  * Commerce: carts, checkout, orders, payments, refunds, inventory, shipping.
@@ -42,7 +43,19 @@ import { CommerceAdminController } from './commerce.controller.js';
     PaymentsService,
     RefundsService,
     ShippingService,
+    // Checkout prices a discount code through the same evaluation the admin
+    // console reads. Provided here rather than imported from the lifecycle
+    // module, which imports this one — the dependency runs one way.
+    CouponsService,
   ],
-  exports: [InventoryService, WarehousesService, OrdersService, CartService],
+  exports: [
+    InventoryService,
+    WarehousesService,
+    OrdersService,
+    CartService,
+    ShippingService,
+    CouponsService,
+    paymentProviderFactory,
+  ],
 })
 export class CommerceModule {}

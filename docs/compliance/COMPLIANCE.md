@@ -328,14 +328,133 @@ written basis, and an acknowledgement typed verbatim rather than ticked. A
 checkbox is exactly how someone arrives at this decision by clicking through
 screens.
 
-Approving still sends nothing. There is no transactional email in this platform;
-when there is, dispatch must remain a further explicit act and not a consequence
-of approval.
+Approving still sends nothing. Phase 5 added transactional email, and recall
+notification is deliberately **not** wired to it: dispatch is a further explicit
+act, not a consequence of approval. Approving unlocks the affected-customer list
+and records who unlocked it and why; reaching those customers remains a manual
+act performed by a person who can answer the questions it will produce.
 
 Closing a recall does not put the stock back: closing records that the response
 is finished, not that the goods turned out to be fine. Cancelling restores each
 lot to the status it held _before_ the recall, and is unavailable once contact
 has been approved.
+
+### Customer-written content (built, Phase 5)
+
+A review is **customer speech about a regulated product published on the
+business's own website**, which means the business is answerable for it. So no
+review is ever visible on the strength of being written: every one is read by a
+person, and the state machine has no edge that bypasses one. There is no rating
+threshold that auto-approves and no phrase list that auto-rejects.
+
+**The system prompts; it never judges.** Wording that often signals a health
+claim — "cured", "treats", a named disease — puts a banner on the moderation
+screen carrying the matched terms. It does not reject, does not publish, and
+does not change the review's state. A word list cannot tell whether "it cured my
+headache" is a disease claim in context, and code that acted on one would be
+making a regulatory decision by substring match, failing in the direction nobody
+notices.
+
+Every moderation outcome requires written reasoning, **publication included**.
+"Why is this live?" is as worth answering as "why was this rejected?", and on a
+health product it is the more important of the two. Decisions are append-only.
+
+**Adverse events are recorded independently of the outcome.** A customer
+describing harm is a safety signal whether or not their words go on the site, so
+the flag is separate from publish/reject rather than a consequence of rejecting.
+Escalation hands the decision to compliance and cannot be taken back.
+
+**This system reports nothing to anyone.** Flagging an adverse event records it
+and surfaces it in the console. Serious adverse event reporting under DSHEA is a
+staffed process outside this platform, and the admin screen says so rather than
+letting the flag imply a report was filed.
+
+`verifiedPurchase` is derived from the reviewer's own order line and has no
+field on the request. A badge that a client could assert would make "verified"
+worth nothing.
+
+### Auto-renewal and cancellation (built, Phase 5)
+
+US auto-renewal statutes — ROSCA federally, and stricter state laws such as
+California's ARL — turn several ordinary product decisions into legal ones.
+
+**Cancelling is one button, immediate, and needs no reason.** There is no
+retention offer, no required explanation, no waiting period and no phone number.
+Each of those is a dark pattern regulators have been explicit about, and none is
+enforceable through this API even if a screen tried.
+
+**The price is the one the subscriber agreed to.** Item prices live on the
+subscription and are never re-read from the catalogue at renewal. A catalogue
+price change does not reach an existing subscription at all. Changing what a
+subscriber pays needs their agreement; until that flow exists, the safe
+behaviour is to charge the agreed amount.
+
+**A failed renewal stops fulfilment before it stops anything else.** The
+subscription moves to `PAST_DUE` — billable, not shippable — and the customer is
+told in the same transaction that records the failure. The important sentence is
+"nothing will ship": a customer who believes a delivery is on its way will not
+act, and it will not arrive.
+
+**Retries are bounded.** When the dunning schedule is exhausted the subscription
+is left `UNPAID` and is not tried again.
+
+**No staff member can charge a subscription by hand.** There is one function
+that takes a recurring payment, and it is called by the API when a subscription
+starts and by the scheduled run. Billing is idempotent per period through a
+unique constraint written before the provider is called.
+
+### Discounts (built, Phase 5)
+
+A checkout names a code and never an amount. What the code is worth is
+recomputed server-side on every repricing, so an amount cannot be supplied by a
+client or go stale against a basket that changed. Percentages round **down** —
+rounding a discount up is money given away by arithmetic nobody reviewed.
+
+Redemption limits are enforced by counting redemption rows under a row lock, not
+by a counter, so two concurrent checkouts cannot both take the last use. A
+per-customer limit is refused unless the code requires a signed-in customer,
+because a limit that silently cannot be enforced is worse than no limit.
+
+### Support and health questions (built, Phase 5)
+
+There is no "medical question" topic, and there deliberately never will be one
+until a qualified person is available to answer. The storefront shows the
+redirect to a doctor or pharmacist **before** the customer types, not after — a
+notice that appears afterwards has already collected the health information it
+was meant to prevent.
+
+Staff internal notes are excluded in the query that builds the customer's view,
+not filtered from a result set afterwards. An internal note also does not notify
+the customer: a notification about a note about them would be the same leak by
+another route.
+
+### Erasure (built, Phase 5)
+
+Deletion is decided by a named person holding `CUSTOMER_ERASE` — separate from
+`CUSTOMER_WRITE`, because editing an account and erasing one are not the same
+authority — with a second factor and written reasoning. Nothing is deleted by
+asking.
+
+What is removed: contact details, addresses, saved payment tokens, support
+conversations, the sign-in, and the customer's name against their reviews.
+
+What is retained, and why:
+
+| Retained                    | Why it cannot be removed on request             |
+| --------------------------- | ----------------------------------------------- |
+| Orders, payments, refunds   | Tax, accounting and consumer-protection records |
+| Which lots the customer got | So a recall can still reach them                |
+| Consent history             | The evidence of what was agreed, and when       |
+| Audit records               | Who did what to the account                     |
+
+The lot-reservation record is the one worth stating plainly: **a recall
+obligation does not lapse because somebody closed their account.** Removing the
+link between a customer and the lots they received would mean the business could
+not warn them, and the customer is told this before they ask.
+
+Reviews are anonymised rather than deleted, because deleting them would silently
+change a published rating other customers rely on. The name comes off; the words
+stay.
 
 ## What AI may and may not do (Phase 7)
 
@@ -365,16 +484,19 @@ worse than no answer.
 
 ## Records to retain
 
-| Record                       | Retained     | Why                                |
-| ---------------------------- | ------------ | ---------------------------------- |
-| Claim approvals and versions | Indefinitely | Substantiation history             |
-| Evidence and reviews         | Indefinitely | Substantiation history             |
-| Claim versions and decisions | Indefinitely | The exact words that were approved |
-| Batch and lot records        | Per policy   | Traceability, recall scope         |
-| Recall actions               | Indefinitely | Regulatory record                  |
-| Audit log                    | Per policy   | Who did what, when                 |
-| Consent ledger               | Per policy   | Proof of permission                |
-| Order and payment records    | Per tax law  | Financial and tax obligations      |
+| Record                       | Retained     | Why                                 |
+| ---------------------------- | ------------ | ----------------------------------- |
+| Claim approvals and versions | Indefinitely | Substantiation history              |
+| Evidence and reviews         | Indefinitely | Substantiation history              |
+| Claim versions and decisions | Indefinitely | The exact words that were approved  |
+| Batch and lot records        | Per policy   | Traceability, recall scope          |
+| Recall actions               | Indefinitely | Regulatory record                   |
+| Audit log                    | Per policy   | Who did what, when                  |
+| Consent ledger               | Per policy   | Proof of permission                 |
+| Review moderation decisions  | Indefinitely | Why customer speech was published   |
+| Subscription events          | Per policy   | What a subscriber was charged, when |
+| Erasure decisions            | Indefinitely | The response to a legal request     |
+| Order and payment records    | Per tax law  | Financial and tax obligations       |
 
 "Per policy" means: decided with counsel, then implemented as a privileged
 out-of-band job. The application itself cannot delete these — see
@@ -394,3 +516,6 @@ out-of-band job. The application itself cannot delete these — see
 - [ ] Insurance in place
 - [ ] Retention periods set with counsel and implemented
 - [ ] Staff trained on what they may and may not say about a product
+- [ ] Review moderators trained on what is and is not a disease claim
+- [ ] Auto-renewal disclosures reviewed by counsel against ROSCA and state law
+- [ ] Support staff trained to redirect clinical questions rather than answer them

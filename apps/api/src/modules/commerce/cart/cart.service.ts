@@ -35,6 +35,14 @@ export interface CartLineView {
 
 export interface CartView {
   id: string;
+  /**
+   * The signed-in customer this cart belongs to, or null for a guest.
+   *
+   * Surfaced because per-customer coupon limits are unenforceable without it —
+   * a code restricted to one use per customer needs to know who the customer
+   * is.
+   */
+  customerId: string | null;
   currency: string;
   lines: CartLineView[];
   itemCount: number;
@@ -230,6 +238,7 @@ export class CartService {
 
     return {
       id: cart.id,
+      customerId: cart.customerId ?? null,
       currency: cart.currency,
       lines,
       itemCount: lines.reduce((sum, line) => sum + line.quantity, 0),

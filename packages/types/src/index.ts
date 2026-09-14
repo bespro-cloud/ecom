@@ -10,3 +10,4 @@ export * from './audit.js';
 export * from './commerce.js';
 export * from './pricing.js';
 export * from './compliance.js';
+export * from './lifecycle.js';

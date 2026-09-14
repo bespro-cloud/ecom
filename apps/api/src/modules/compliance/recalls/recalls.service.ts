@@ -554,9 +554,9 @@ export class RecallsService {
    * required written basis.
    *
    * Approving still sends nothing. It unlocks the affected-customer list for
-   * someone to act on, and records who unlocked it and why. There is no
-   * transactional email in this platform yet; when there is, dispatch will be a
-   * further explicit act and not a consequence of this one.
+   * someone to act on, and records who unlocked it and why. The platform does
+   * have transactional email, and recall notification is deliberately not wired
+   * to it: dispatch is a further explicit act, not a consequence of this one.
    */
   async approveNotification(
     recallId: string,

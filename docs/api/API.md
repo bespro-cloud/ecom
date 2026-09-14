@@ -194,13 +194,14 @@ Every route here is public: a customer browsing does not have an account. The
 scoping is structural rather than permission-based — these read only published,
 non-deleted products, and no parameter can widen that.
 
-| Endpoint                           | Purpose                                      |
-| ---------------------------------- | -------------------------------------------- |
-| `GET /catalogue/products`          | Browse and search, with facet counts         |
-| `GET /catalogue/products/:slug`    | One published product, in full               |
-| `GET /catalogue/categories`        | The active category tree                     |
-| `GET /catalogue/ingredients/:slug` | One ingredient, with sourcing and warnings   |
-| `GET /catalogue/sitemap`           | Indexable URLs, excluding anything `noindex` |
+| Endpoint                                | Purpose                                      |
+| --------------------------------------- | -------------------------------------------- |
+| `GET /catalogue/products`               | Browse and search, with facet counts         |
+| `GET /catalogue/products/:slug`         | One published product, in full               |
+| `GET /catalogue/products/:slug/reviews` | Published reviews and the rating summary     |
+| `GET /catalogue/categories`             | The active category tree                     |
+| `GET /catalogue/ingredients/:slug`      | One ingredient, with sourcing and warnings   |
+| `GET /catalogue/sitemap`                | Indexable URLs, excluding anything `noindex` |
 
 `GET /catalogue/products` accepts `q`, `category`, `type`, `brand`,
 `minPriceCents`, `maxPriceCents`, repeatable `attr=key:value`, `sort` and
@@ -612,8 +613,9 @@ ticked — because a checkbox is exactly how someone arrives here by clicking
 through screens.
 
 Approving still **sends nothing**. It unlocks the list and records who unlocked
-it and why. There is no transactional email in this platform; when there is,
-dispatch must remain a further explicit act.
+it and why. Transactional email exists in this platform from Phase 5, and recall
+notification is deliberately not wired to it: dispatch must remain a further
+explicit act rather than a consequence of approval.
 
 The database enforces the important half independently: a recall cannot sit in
 `NOTIFICATION_APPROVED` without a named approver and a timestamp, and every
@@ -624,6 +626,192 @@ Cancelling restores each lot to the status it held **before** the recall, not to
 sellable because a different recall was withdrawn. Cancelling is unavailable once
 contact has been approved; at that point the recall is a matter of record and is
 closed rather than undone.
+
+## Reviews
+
+| Endpoint                                         | Permission        |
+| ------------------------------------------------ | ----------------- |
+| `GET /catalogue/products/:slug/reviews` · public | —                 |
+| `POST /account/reviews`                          | session           |
+| `GET /account/reviews`                           | session           |
+| `GET /admin/lifecycle/reviews`                   | `REVIEW_READ`     |
+| `GET /admin/lifecycle/reviews/:id`               | `REVIEW_READ`     |
+| `POST /admin/lifecycle/reviews/:id/moderate`     | `REVIEW_MODERATE` |
+
+**A review is never visible on the strength of being written.** `POST` returns
+`status: "PENDING"` and a `visibility` sentence saying a person will read it
+first. There is no rating threshold that auto-approves and no state-machine edge
+that bypasses a moderator.
+
+**`verifiedPurchase` is derived, never asserted.** The create schema has no such
+field. The badge comes from an order line belonging to the caller, resolved from
+the optional `orderItemId`; naming somebody else's line produces a refusal, not
+an un-badged review.
+
+**`claimPromptTerms` and `adverseEventPromptTerms` are advisory.** They record
+which phrases matched a word list, so a moderation screen can put a banner at
+the top. Nothing in the system branches on them to decide an outcome: a word
+list cannot tell whether "it cured my headache" is a disease claim in context.
+
+Moderation requires written `notes` on **every** outcome, publication included,
+and `reason` additionally when rejecting. `flagAdverseEvent` is recorded
+independently of the decision — a customer describing harm is a safety signal
+whether or not their words go on the site. Escalation to compliance cannot be
+taken back.
+
+The public route returns `summary.average` as `null` when nothing is published:
+"no reviews yet" and "averages zero stars" are different facts, and zero is not
+a rating anyone can give. The average is computed over the published set in the
+same query, so unmoderated text cannot move the number while its words stay
+hidden.
+
+## Discount codes
+
+| Endpoint                                   | Permission     |
+| ------------------------------------------ | -------------- |
+| `POST /checkout/:id/coupon` · public       | —              |
+| `DELETE /checkout/:id/coupon` · public     | —              |
+| `GET /admin/lifecycle/coupons`             | `COUPON_READ`  |
+| `POST /admin/lifecycle/coupons`            | `COUPON_WRITE` |
+| `POST /admin/lifecycle/coupons/:id/active` | `COUPON_WRITE` |
+
+**The code is the entire input.** `applyCouponSchema` has one field. What the
+code is worth is looked up and recomputed on every repricing, so there is no
+amount a request could name and no stored figure to go stale against a basket
+that changed underneath it.
+
+A checkout view carries `coupon.applied` and, when it is false, a `message`
+saying why — a code that stopped applying is explained rather than silently
+dropped.
+
+Percentages are expressed in basis points (1250 = 12.5%) and **round down**.
+Redemption limits are enforced by counting redemption rows under
+`SELECT … FOR UPDATE`, not by a counter, so two concurrent checkouts cannot both
+take the last remaining use. A `maxPerCustomer` limit is refused unless
+`requiresCustomer` is set: there is nobody to count a guest's redemptions
+against, and a limit that silently does nothing is worse than no limit.
+
+## Subscriptions
+
+| Endpoint                                 | Permission          |
+| ---------------------------------------- | ------------------- |
+| `GET /account/payment-methods`           | session             |
+| `POST /account/payment-methods`          | session             |
+| `DELETE /account/payment-methods/:id`    | session             |
+| `GET /account/subscriptions`             | session             |
+| `POST /account/subscriptions`            | session             |
+| `PATCH /account/subscriptions/:id`       | session             |
+| `POST /account/subscriptions/:id/pause`  | session             |
+| `POST /account/subscriptions/:id/resume` | session             |
+| `POST /account/subscriptions/:id/cancel` | session             |
+| `GET /admin/lifecycle/subscriptions`     | `SUBSCRIPTION_READ` |
+| `GET /admin/lifecycle/subscriptions/:id` | `SUBSCRIPTION_READ` |
+
+**There is no field anywhere for a card number.** `attachPaymentMethodSchema`
+takes the provider token the browser received after sending the card to the
+provider directly. No `number`, no `expiry`, no `cvc`, and no shape in which one
+could be passed — that is what keeps this application out of PCI DSS scope. The
+brand and last four are read back **from the provider**, not accepted from the
+request: a client that could label its own token could label somebody else's
+saved card however it liked.
+
+**Renewals charge the agreed price.** Item prices live on the subscription and
+are not re-read from the catalogue. A catalogue price change does not reach an
+existing subscription at all; changing what a subscriber pays needs their
+agreement, and that flow does not exist yet.
+
+**Billing is idempotent per period.** A `SubscriptionInvoice` row is unique on
+`(subscription, period start)` and is written **before** the provider is called.
+A second run for the same period loses the insert and returns without charging;
+a crash between charging and recording leaves an invoice to reconcile against
+rather than money that left with no trace. A separate guard refuses a
+subscription whose `nextBillingAt` has not arrived, because a success rolls the
+period forward and the constraint would not fire on an early second call.
+
+**A failed renewal stops fulfilment immediately.** The subscription moves to
+`PAST_DUE`: billable, not shippable. Retries follow a bounded schedule
+(`subscriptions.dunning_days`, default 1/3/5 days); when it is exhausted the
+subscription is left `UNPAID` rather than retried forever.
+
+Cancelling takes effect immediately, needs no reason, and has no retention step.
+A cancelled subscription cannot hold a `next_billing_at` at all — a database
+CHECK refuses it — so a billing run cannot charge somebody who cancelled even if
+its query were wrong.
+
+There is deliberately **no admin endpoint that charges a card**. The only code
+that takes a recurring payment is `billSubscriptionPeriod` in
+`@health/database`, called by the API when a subscription starts and by the
+worker's hourly run. A staff member charging by hand is the path that produces
+duplicate charges nobody can reconcile.
+
+## Support conversations
+
+| Endpoint                                    | Permission      |
+| ------------------------------------------- | --------------- |
+| `GET /account/support/guidance`             | session         |
+| `GET /account/support`                      | session         |
+| `GET /account/support/:id`                  | session         |
+| `POST /account/support`                     | session         |
+| `POST /account/support/:id/replies`         | session         |
+| `GET /admin/lifecycle/support`              | `SUPPORT_READ`  |
+| `GET /admin/lifecycle/support/:id`          | `SUPPORT_READ`  |
+| `POST /admin/lifecycle/support/:id/replies` | `SUPPORT_WRITE` |
+| `POST /admin/lifecycle/support/:id/status`  | `SUPPORT_WRITE` |
+
+**There is no medical topic.** The topic enum has no option for a clinical
+question, and `/guidance` returns the redirect the storefront shows **before**
+the customer types. A notice that appeared afterwards would have collected the
+health information it was meant to prevent.
+
+**Internal notes are excluded in the query, not filtered afterwards.** The
+customer-facing read passes `where: { isInternal: false }`; a `.filter()` on a
+result set is one careless refactor away from leaking staff commentary to the
+person it is about. A customer cannot set `isInternal` — the API refuses it and
+a database CHECK refuses it regardless. An internal note does not notify the
+customer either: a notification about a note about them would be the same leak
+by another route.
+
+Staff replies are attributed to "Support" in the customer's view. A support
+reply is from the business, not from an individual's inbox.
+
+## Account data and erasure
+
+| Endpoint                                              | Permission             |
+| ----------------------------------------------------- | ---------------------- |
+| `GET /account/consents`                               | session                |
+| `PATCH /account/marketing-preferences`                | session                |
+| `GET /account/export`                                 | session                |
+| `GET /account/erasure`                                | session                |
+| `POST /account/erasure`                               | session                |
+| `GET /admin/lifecycle/erasure-requests`               | `CUSTOMER_READ`        |
+| `POST /admin/lifecycle/erasure-requests/:id/decision` | `CUSTOMER_ERASE` + MFA |
+
+`GET /account/erasure` returns what deletion **would** and **would not** remove,
+shown before the customer asks rather than after. `POST` requires the literal
+acknowledgement `DELETE MY ACCOUNT`, typed rather than ticked, because this is
+irreversible and a checkbox is a mis-click.
+
+Nothing is deleted by asking. A named person with `CUSTOMER_ERASE` and a second
+factor decides, and written reasoning is required: this is the response to a
+legal request, and "what did you remove and what did you keep?" has to be
+answerable years later.
+
+`CUSTOMER_ERASE` is deliberately separate from `CUSTOMER_WRITE`. Correcting a
+misspelled name and erasing somebody's data are not the same authority, and only
+one of them cannot be undone.
+
+**What erasure retains, and why.** Orders, payments and refunds (tax,
+accounting and consumer-protection records); consent history (the evidence of
+what was agreed); audit records; and the reservations recording **which lots the
+customer received** — that last one is what lets a recall reach them, and the
+obligation does not lapse because somebody closed their account. Reviews are
+**anonymised rather than deleted**: removing them would silently change a
+published rating other customers are relying on. The name comes off; the words
+stay.
+
+Marketing preferences write to an append-only consent ledger, so withdrawal adds
+an entry rather than erasing the grant. Transactional mail is not on that list:
+you cannot unsubscribe from being told your order shipped.
 
 ## Media
 

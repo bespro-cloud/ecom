@@ -27,6 +27,11 @@ import { InventoryService, InsufficientStockError } from '../inventory/inventory
 import { ShippingService } from '../shipping/shipping.service.js';
 import { PaymentsService } from '../payments/payments.service.js';
 import { OrdersService } from '../orders/orders.service.js';
+import {
+  CouponsService,
+  type CouponEvaluation,
+  type DiscountableLine,
+} from '../../lifecycle/coupons/coupons.service.js';
 import type { ActorContext } from '../../rbac/roles.service.js';
 
 export interface CheckoutView {
@@ -47,6 +52,18 @@ export interface CheckoutView {
   /** Null when no tax rate is configured, so "zero" is distinguishable. */
   taxRateApplied: number | null;
   pricingFingerprint: string | null;
+  /**
+   * The applied code and what it is currently worth. Recomputed on every view;
+   * never taken from the request.
+   */
+  coupon: {
+    code: string;
+    name: string | null;
+    applied: boolean;
+    discountCents: number;
+    freeShipping: boolean;
+    message: string | null;
+  } | null;
   expiresAt: string | null;
   /** Present once a payment intent exists. */
   payment: { provider: string; clientSecret: string | null; isRealMoney: boolean } | null;
@@ -91,6 +108,7 @@ export class CheckoutService {
     private readonly orders: OrdersService,
     private readonly logger: PinoLogger,
     @Inject(CLOCK) private readonly clock: Clock,
+    private readonly coupons: CouponsService,
   ) {
     this.logger.setContext(CheckoutService.name);
   }
@@ -152,6 +170,81 @@ export class CheckoutService {
     }
   }
 
+  /**
+   * Applies a discount code to a checkout.
+   *
+   * Stores the *code*, never a value. The discount is recomputed from the
+   * coupon's own rules on every repricing, so there is no stored number a
+   * tampered request could have influenced and no stale amount to go out of
+   * date with the basket.
+   *
+   * An inapplicable code is refused here so the customer is told why, rather
+   * than silently stored and quietly worth nothing at checkout.
+   */
+  async applyCoupon(checkoutId: string, code: string): Promise<CheckoutView> {
+    const checkout = await this.requireOpen(checkoutId);
+    const cart = await this.carts.view(checkout.cartId);
+
+    const evaluation = await this.coupons.evaluate(code, {
+      lines: await this.discountableLines(cart.lines),
+      subtotalCents: cart.subtotalCents,
+      // Evaluated against the currently chosen shipping, which is what a
+      // free-shipping code would zero.
+      shippingCents: 0,
+      customerId: cart.customerId ?? null,
+    });
+
+    if (!evaluation.applicable) {
+      throw AppException.preconditionFailed(evaluation.message ?? 'That code is not valid.');
+    }
+
+    await this.prisma.checkout.update({
+      where: { id: checkoutId },
+      data: { couponCode: evaluation.code },
+    });
+
+    return this.view(checkoutId);
+  }
+
+  async removeCoupon(checkoutId: string): Promise<CheckoutView> {
+    await this.requireOpen(checkoutId);
+    await this.prisma.checkout.update({
+      where: { id: checkoutId },
+      data: { couponCode: null },
+    });
+    return this.view(checkoutId);
+  }
+
+  /**
+   * Cart lines in the shape coupon eligibility needs.
+   *
+   * Categories come from the catalogue, not from the cart row, because "20% off
+   * vitamins" has to know what a line *is* — and the cart deliberately stores
+   * as little product detail as it can get away with.
+   */
+  private async discountableLines(
+    lines: Array<{ productId: string; quantity: number; unitPriceCents: number }>,
+  ): Promise<DiscountableLine[]> {
+    if (lines.length === 0) return [];
+
+    const categories = await this.prisma.productCategory.findMany({
+      where: { productId: { in: lines.map((line) => line.productId) } },
+      select: { productId: true, categoryId: true },
+    });
+
+    const byProduct = new Map<string, string[]>();
+    for (const row of categories) {
+      byProduct.set(row.productId, [...(byProduct.get(row.productId) ?? []), row.categoryId]);
+    }
+
+    return lines.map((line) => ({
+      productId: line.productId,
+      categoryIds: byProduct.get(line.productId) ?? [],
+      quantity: line.quantity,
+      unitPriceCents: line.unitPriceCents,
+    }));
+  }
+
   /** Sets addresses and the shipping choice, then reprices. */
   async update(checkoutId: string, input: UpdateCheckoutInput): Promise<CheckoutView> {
     const checkout = await this.requireOpen(checkoutId);
@@ -209,6 +302,8 @@ export class CheckoutService {
       : null;
 
     let priced: PricingResult | null = null;
+    let coupon: CouponEvaluation | null = null;
+
     if (cart.lines.length > 0) {
       const lines: PricingLineInput[] = cart.lines.map((line) => ({
         variantId: line.variantId,
@@ -221,10 +316,28 @@ export class CheckoutService {
         taxable: true,
       }));
 
+      const shippingBeforeDiscount = chosen?.priceCents ?? 0;
+
+      // Re-evaluated on every view rather than once when the code was typed, so
+      // a basket that changed afterwards is measured against the coupon's
+      // actual rules. A customer who applies "$20 off orders over $100" and
+      // then removes items does not keep the twenty dollars.
+      if (checkout.couponCode) {
+        coupon = await this.coupons.evaluate(checkout.couponCode, {
+          lines: await this.discountableLines(cart.lines),
+          subtotalCents: cart.subtotalCents,
+          shippingCents: shippingBeforeDiscount,
+          customerId: cart.customerId ?? null,
+        });
+      }
+
       priced = priceOrder({
         currency: 'USD',
         lines,
-        shippingCents: chosen?.priceCents ?? 0,
+        // A free-shipping coupon is applied by pricing delivery at zero, not by
+        // discounting the goods — so it never appears twice.
+        shippingCents: coupon?.freeShipping ? 0 : shippingBeforeDiscount,
+        discountCents: coupon?.discountCents ?? 0,
         taxRate: await this.taxRateFor(shippingAddress),
         taxShipping: (await this.settings.get<boolean>('tax.shipping_taxable')) ?? false,
       });
@@ -261,6 +374,17 @@ export class CheckoutService {
       totalCents: priced?.totalCents ?? 0,
       taxRateApplied: priced?.taxRateApplied ?? null,
       pricingFingerprint: priced?.fingerprint ?? null,
+      coupon: coupon
+        ? {
+            code: coupon.code,
+            name: coupon.name,
+            applied: coupon.applicable,
+            discountCents: coupon.discountCents,
+            freeShipping: coupon.freeShipping,
+            /** Why it did not apply, in words the customer can act on. */
+            message: coupon.message,
+          }
+        : null,
       expiresAt: checkout.expiresAt?.toISOString() ?? null,
       payment: payment
         ? {

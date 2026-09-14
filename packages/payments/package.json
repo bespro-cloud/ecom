@@ -22,6 +22,7 @@
     "clean": "rm -rf dist .turbo"
   },
   "dependencies": {
+    "@health/config": "workspace:*",
     "@health/types": "workspace:*"
   },
   "devDependencies": {

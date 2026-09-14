@@ -17,6 +17,7 @@
     "@health/config": "workspace:*",
     "@health/database": "workspace:*",
     "@health/notifications": "workspace:*",
+    "@health/payments": "workspace:*",
     "@health/types": "workspace:*",
     "@nestjs/common": "11.0.6",
     "@nestjs/core": "11.0.6",

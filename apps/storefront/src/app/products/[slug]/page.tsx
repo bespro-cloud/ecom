@@ -8,6 +8,9 @@ import { formatMoney } from '@/lib/format';
 import { BreadcrumbStructuredData, ProductStructuredData } from '@/components/structured-data';
 import { ProductGallery } from '@/components/product-gallery';
 import { AddToCart } from '@/components/add-to-cart';
+import { ProductReviews } from '@/components/product-reviews';
+import { fetchProductReviews } from '@/lib/lifecycle';
+import { currentUser } from '@/lib/session';
 
 async function load(slug: string): Promise<ProductDetail> {
   try {
@@ -46,7 +49,13 @@ export async function generateMetadata({
 
 export default async function ProductPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
-  const product = await load(slug);
+  // Reviews are fetched alongside the listing rather than after it: they are
+  // part of the page, and a second waterfall would delay the whole render.
+  const [product, reviews, user] = await Promise.all([
+    load(slug),
+    fetchProductReviews(slug),
+    currentUser(),
+  ]);
   const url = `${publicConfig.siteUrl}/products/${product.slug}`;
 
   const trail = [
@@ -237,6 +246,8 @@ export default async function ProductPage({ params }: { params: Promise<{ slug: 
           </ul>
         </section>
       ) : null}
+
+      <ProductReviews slug={product.slug} data={reviews} canWrite={user !== null} />
 
       {product.disclaimers.length > 0 ? (
         <section aria-labelledby="disclaimers-heading" className="mt-12 max-w-prose">

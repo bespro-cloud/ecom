@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { Alert, Badge, Button, Card, PageHeader } from '@health/ui';
+import { Alert, Badge, Card, PageHeader } from '@health/ui';
 import { apiRequestOrSignIn } from '@/lib/guards';
 import { currentUser } from '@/lib/session';
 import { formatDate } from '@/lib/format';
@@ -8,6 +8,27 @@ import { ResendVerificationButton } from '@/components/resend-verification-butto
 import { MarketingPreferences } from '@/components/marketing-preferences';
 
 export const metadata: Metadata = { title: 'Your account', robots: { index: false } };
+
+const SECTIONS = [
+  { href: '/orders', title: 'Orders', description: 'What you ordered, and where it is.' },
+  {
+    href: '/account/subscriptions',
+    title: 'Subscriptions',
+    description: 'Repeat deliveries: pause, change the card, or cancel.',
+  },
+  {
+    href: '/account/reviews',
+    title: 'Reviews',
+    description: 'What you have written, published or still being read.',
+  },
+  { href: '/account/support', title: 'Support', description: 'Your conversations with our team.' },
+  { href: '/account/addresses', title: 'Addresses', description: 'Where we deliver.' },
+  {
+    href: '/account/privacy',
+    title: 'Your data',
+    description: 'Download a copy, or ask us to delete your account.',
+  },
+] as const;
 
 interface CustomerProfile {
   customerId: string;
@@ -111,15 +132,20 @@ export default async function AccountPage() {
       </Card>
 
       <Card>
-        <h2 className="text-lg font-semibold text-slate-900">Orders</h2>
-        <p className="mt-1 text-sm text-slate-600">
-          Ordering opens when the catalogue is published. Your order history will appear here.
-        </p>
-        <div className="mt-4">
-          <Link href="/">
-            <Button variant="secondary">Back to the homepage</Button>
-          </Link>
-        </div>
+        <h2 className="text-lg font-semibold text-slate-900">Everything else</h2>
+        <ul className="mt-4 grid gap-3 sm:grid-cols-2">
+          {SECTIONS.map((section) => (
+            <li key={section.href}>
+              <Link
+                href={section.href}
+                className="block rounded-lg p-3 ring-1 ring-slate-200 transition-colors hover:bg-slate-50"
+              >
+                <span className="block text-sm font-semibold text-slate-900">{section.title}</span>
+                <span className="mt-0.5 block text-sm text-slate-600">{section.description}</span>
+              </Link>
+            </li>
+          ))}
+        </ul>
       </Card>
     </div>
   );

@@ -12,7 +12,10 @@ import type { CancelOrderInput, OrderAddressInput, OrderQuery } from '@health/va
 import { PrismaService } from '../../../infrastructure/prisma/prisma.service.js';
 import { CLOCK } from '../../../infrastructure/config/config.module.js';
 import { AppException } from '../../../common/errors/app-exception.js';
+import { DOMAIN_EVENTS } from '@health/types';
 import { AuditService } from '../../audit/audit.service.js';
+import { OutboxService } from '../../../infrastructure/outbox/outbox.service.js';
+import { CouponsService } from '../../lifecycle/coupons/coupons.service.js';
 import { COMMERCE_AUDIT_ACTIONS } from '../commerce.audit.js';
 import { InventoryService } from '../inventory/inventory.service.js';
 import type { ActorContext } from '../../rbac/roles.service.js';
@@ -44,6 +47,8 @@ export class OrdersService {
     private readonly inventory: InventoryService,
     private readonly logger: PinoLogger,
     @Inject(CLOCK) private readonly clock: Clock,
+    private readonly coupons: CouponsService,
+    private readonly outbox: OutboxService,
   ) {
     this.logger.setContext(OrdersService.name);
   }
@@ -135,11 +140,31 @@ export class OrdersService {
           shippingAddress: shippingAddress as never,
           billingAddress: (checkout.billingAddress ?? null) as never,
           shippingMethodCode: checkout.shippingMethodCode,
+          couponCode: checkout.couponCode,
           customerNote: checkout.cart.note,
           placedAt: this.clock.now(),
           ...(payment.status === 'CAPTURED' ? { paidAt: this.clock.now() } : {}),
         },
       });
+
+      // The redemption commits with the order, in one transaction. An order
+      // that got a discount without a redemption row would be a discount
+      // nobody counted — and the usage limit is enforced by counting rows.
+      if (checkout.couponCode && checkout.discountCents > 0) {
+        const coupon = await tx.coupon.findFirst({
+          where: { code: { equals: checkout.couponCode, mode: 'insensitive' } },
+          select: { id: true },
+        });
+        if (coupon) {
+          await this.coupons.redeemIn(tx, {
+            couponId: coupon.id,
+            orderId: created.id,
+            customerId: checkout.cart.customerId ?? null,
+            amountCents: checkout.discountCents,
+            currency: checkout.currency,
+          });
+        }
+      }
 
       // Line-level discount and tax come from the checkout's own allocation, so
       // the lines sum to the order exactly — which the database also checks.
@@ -221,6 +246,17 @@ export class OrdersService {
         },
         ipAddress: actor.ipAddress ?? null,
         userAgent: actor.userAgent ?? null,
+        correlationId: actor.correlationId,
+      });
+
+      // Published in the same transaction as the order. An order that exists
+      // without its confirmation queued would be a customer who bought
+      // something and heard nothing; the outbox is what makes the two atomic.
+      await this.outbox.publish(tx, {
+        aggregateType: 'order',
+        aggregateId: created.id,
+        eventType: DOMAIN_EVENTS.ORDER_PLACED,
+        payload: { reference: created.reference, totalCents: created.totalCents },
         correlationId: actor.correlationId,
       });
 
@@ -354,6 +390,14 @@ export class OrdersService {
         after: { status: 'CANCELLED', refundRequested: input.refund },
         ipAddress: actor.ipAddress ?? null,
         userAgent: actor.userAgent ?? null,
+        correlationId: actor.correlationId,
+      });
+
+      await this.outbox.publish(tx, {
+        aggregateType: 'order',
+        aggregateId: orderId,
+        eventType: DOMAIN_EVENTS.ORDER_CANCELLED,
+        payload: { reason: input.reason, refundRequested: input.refund },
         correlationId: actor.correlationId,
       });
     });

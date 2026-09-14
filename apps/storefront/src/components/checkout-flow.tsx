@@ -62,6 +62,9 @@ export function CheckoutFlow({ cart }: { cart: Cart }) {
     country: 'US',
   });
   const [shippingCode, setShippingCode] = useState<string | null>(null);
+  const [couponCode, setCouponCode] = useState('');
+  const [couponBusy, setCouponBusy] = useState(false);
+  const [couponError, setCouponError] = useState<string | null>(null);
 
   /** Starts (or re-attaches to) the checkout for this basket. */
   const start = useCallback(async (): Promise<Checkout | null> => {
@@ -182,12 +185,43 @@ export function CheckoutFlow({ cart }: { cart: Cart }) {
 
   const totals = checkout ?? {
     subtotalCents: cart.subtotalCents,
+    discountCents: 0,
     shippingCents: 0,
     taxCents: 0,
     totalCents: cart.subtotalCents,
     taxRateApplied: null as number | null,
     currency: cart.currency,
   };
+
+  /**
+   * Applies or removes a discount code.
+   *
+   * The code is the entire request. What it is worth is decided by the API and
+   * recomputed on every repricing, so there is no amount this component could
+   * name and no stale figure to drift from the basket. A code the server
+   * refuses comes back with the reason, which is shown as-is.
+   */
+  async function changeCoupon(code: string | null): Promise<void> {
+    if (!checkout) return;
+    setCouponBusy(true);
+    setCouponError(null);
+    try {
+      const updated = await clientRequest<Checkout>(
+        `/api/v1/checkout/${checkout.id}/coupon`,
+        code ? { method: 'POST', body: { code } } : { method: 'DELETE' },
+      );
+      setCheckout(updated);
+      if (code) setCouponCode('');
+    } catch (caught) {
+      setCouponError(
+        caught instanceof ClientApiError
+          ? caught.message
+          : 'We could not apply that code. Please try again.',
+      );
+    } finally {
+      setCouponBusy(false);
+    }
+  }
 
   return (
     <div className="grid gap-8 lg:grid-cols-[1fr_20rem]">
@@ -376,6 +410,21 @@ export function CheckoutFlow({ cart }: { cart: Cart }) {
             <dt className="text-slate-600">Subtotal</dt>
             <dd className="text-slate-900">{formatMoney(totals.subtotalCents, totals.currency)}</dd>
           </div>
+          {totals.discountCents > 0 ? (
+            <div className="flex justify-between">
+              <dt className="text-slate-600">
+                Discount
+                {checkout?.coupon ? (
+                  <span className="ml-1 font-mono text-xs uppercase text-slate-500">
+                    {checkout.coupon.code}
+                  </span>
+                ) : null}
+              </dt>
+              <dd className="text-emerald-700">
+                −{formatMoney(totals.discountCents, totals.currency)}
+              </dd>
+            </div>
+          ) : null}
           <div className="flex justify-between">
             <dt className="text-slate-600">Delivery</dt>
             <dd className="text-slate-900">
@@ -401,6 +450,56 @@ export function CheckoutFlow({ cart }: { cart: Cart }) {
             <dd className="text-slate-900">{formatMoney(totals.totalCents, totals.currency)}</dd>
           </div>
         </dl>
+
+        {checkout ? (
+          <div className="mt-4 border-t border-slate-200 pt-4">
+            {checkout.coupon ? (
+              <div className="space-y-2">
+                <p className="text-sm text-slate-700">
+                  <span className="font-mono font-medium uppercase text-slate-900">
+                    {checkout.coupon.code}
+                  </span>
+                  {checkout.coupon.name ? ` — ${checkout.coupon.name}` : ''}
+                </p>
+                {/* A code that no longer applies is explained rather than
+                    silently dropped: the customer typed it for a reason. */}
+                {!checkout.coupon.applied && checkout.coupon.message ? (
+                  <Alert tone="warning">{checkout.coupon.message}</Alert>
+                ) : null}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  loading={couponBusy}
+                  loadingLabel="Removing…"
+                  onClick={() => void changeCoupon(null)}
+                >
+                  Remove code
+                </Button>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <Field
+                  label="Discount code"
+                  value={couponCode}
+                  autoCapitalize="characters"
+                  autoComplete="off"
+                  error={couponError ?? undefined}
+                  onChange={(event) => setCouponCode(event.target.value)}
+                />
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  loading={couponBusy}
+                  loadingLabel="Applying…"
+                  disabled={couponCode.trim().length === 0}
+                  onClick={() => void changeCoupon(couponCode.trim())}
+                >
+                  Apply
+                </Button>
+              </div>
+            )}
+          </div>
+        ) : null}
       </aside>
     </div>
   );

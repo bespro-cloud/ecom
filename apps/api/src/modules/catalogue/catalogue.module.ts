@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ReviewsService } from '../lifecycle/reviews/reviews.service.js';
 import { MediaModule } from '../media/media.module.js';
 import { CommerceModule } from '../commerce/commerce.module.js';
 import { ProductsService } from './products/products.service.js';
@@ -24,6 +25,10 @@ import { AdminCatalogueController } from './admin-catalogue.controller.js';
   imports: [MediaModule, CommerceModule],
   controllers: [CatalogueController, AdminCatalogueController],
   providers: [
+    // The product page shows its published reviews. Provided here rather
+    // than imported from the lifecycle module, which imports commerce, which
+    // imports this — the dependency runs one way.
+    ReviewsService,
     ProductsService,
     CatalogueService,
     CategoriesService,

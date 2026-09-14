@@ -157,9 +157,12 @@ describe('outbox dispatcher', () => {
     const user = await createUser();
     await prisma.outboxMessage.create({
       data: {
-        aggregateType: 'order',
+        aggregateType: 'product',
         aggregateId: user.id,
-        eventType: 'order.placed.v1',
+        // Deliberately an event nothing consumes. An event with no handler is
+        // still evidence that something happened, so it must land somewhere
+        // rather than being silently discarded.
+        eventType: 'product.viewed.v1',
         payload: {},
       },
     });

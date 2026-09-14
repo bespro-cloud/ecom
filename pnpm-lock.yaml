@@ -290,6 +290,9 @@ importers:
       '@health/notifications':
         specifier: workspace:*
         version: link:../../packages/notifications
+      '@health/payments':
+        specifier: workspace:*
+        version: link:../../packages/payments
       '@health/types':
         specifier: workspace:*
         version: link:../../packages/types
@@ -457,6 +460,9 @@ importers:
 
   packages/payments:
     dependencies:
+      '@health/config':
+        specifier: workspace:*
+        version: link:../config
       '@health/types':
         specifier: workspace:*
         version: link:../types

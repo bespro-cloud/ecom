@@ -91,6 +91,19 @@ export interface Checkout {
   totalCents: number;
   taxRateApplied: number | null;
   pricingFingerprint: string | null;
+  /**
+   * The applied code and what it is currently worth. Recomputed by the API on
+   * every view — never a figure this app stored or the browser supplied.
+   */
+  coupon: {
+    code: string;
+    name: string | null;
+    applied: boolean;
+    discountCents: number;
+    freeShipping: boolean;
+    /** Why it did not apply, in words the customer can act on. */
+    message: string | null;
+  } | null;
   expiresAt: string | null;
   payment: { provider: string; clientSecret: string | null; isRealMoney: boolean } | null;
 }
@@ -110,6 +123,7 @@ export interface OrderSummary {
   placedAt: string;
   items: Array<{
     id: string;
+    productId: string;
     sku: string;
     productName: string;
     variantName: string;

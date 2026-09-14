@@ -1,11 +1,13 @@
-import { Body, Controller, Get, Param, Patch, Post, Req, Res } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Req, Res } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Request, Response } from 'express';
 import {
+  applyCouponSchema,
   confirmCheckoutSchema,
   startCheckoutSchema,
   updateCheckoutSchema,
   uuidSchema,
+  type ApplyCouponInput,
   type ConfirmCheckoutInput,
   type StartCheckoutInput,
   type UpdateCheckoutInput,
@@ -82,6 +84,36 @@ export class CheckoutController {
   ): Promise<CheckoutView> {
     await this.assertOwned(id, request, principal);
     return this.checkouts.update(id, input);
+  }
+
+  @Post(':id/coupon')
+  @Public()
+  @RateLimit('sensitive')
+  @ApiOperation({
+    summary: 'Apply a discount code',
+    description:
+      'The code is the entire input. What it is worth is looked up and recomputed server-side on every repricing, so there is no amount a request could name and no stale figure to go out of date with the basket.',
+  })
+  async applyCoupon(
+    @Param('id', new ZodValidationPipe(uuidSchema)) id: string,
+    @Body(zodBody(applyCouponSchema)) input: ApplyCouponInput,
+    @Req() request: Request,
+    @OptionalUser() principal?: AuthenticatedPrincipal,
+  ): Promise<CheckoutView> {
+    await this.assertOwned(id, request, principal);
+    return this.checkouts.applyCoupon(id, input.code);
+  }
+
+  @Delete(':id/coupon')
+  @Public()
+  @ApiOperation({ summary: 'Remove the applied discount code' })
+  async removeCoupon(
+    @Param('id', new ZodValidationPipe(uuidSchema)) id: string,
+    @Req() request: Request,
+    @OptionalUser() principal?: AuthenticatedPrincipal,
+  ): Promise<CheckoutView> {
+    await this.assertOwned(id, request, principal);
+    return this.checkouts.removeCoupon(id);
   }
 
   @Post(':id/prepare')

@@ -73,6 +73,10 @@ export const PERMISSIONS = [
   define('customer', 'read', 'View customer accounts'),
   define('customer', 'write', 'Update customer account details'),
   define('customer', 'impersonate', 'Open a scoped read-only support view of a customer account'),
+  // Separate from CUSTOMER_WRITE on purpose. Correcting a misspelled name and
+  // erasing somebody's data are not the same authority, and the second one is
+  // not reversible.
+  define('customer', 'erase', 'Decide a data deletion request'),
 
   // Catalogue (Phase 2)
   define('product', 'read', 'View products including unpublished drafts'),

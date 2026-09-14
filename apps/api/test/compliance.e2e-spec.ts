@@ -1342,8 +1342,8 @@ describe('approving customer contact', () => {
 
 describe('the recall record', () => {
   it('sends nothing to anybody', async () => {
-    // There is no transactional email in the platform yet, and this phase adds
-    // none. The assertion is that approving notification queued no work that
+    // The platform has transactional email; recall notification is deliberately
+    // not wired to it. The assertion is that approving queued no work that
     // could reach a customer — the outbox is the only path that could, so it is
     // checked for anything referring to the recall, the order, or the customer
     // themselves. (Sign-in writes an unrelated `user.*` event, which is why

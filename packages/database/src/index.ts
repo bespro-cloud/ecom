@@ -7,3 +7,12 @@ export {
   type MaintenanceDeps,
 } from './maintenance/commerce.js';
 export { expireLapsedClaims, expireLapsedLots } from './maintenance/compliance.js';
+export {
+  billSubscriptionPeriod,
+  priceSubscriptionPeriod,
+  listDueSubscriptions,
+  type BillingDeps,
+  type BillingEvent,
+  type BillingOutcome,
+  type BillingPaymentProvider,
+} from './maintenance/subscriptions.js';

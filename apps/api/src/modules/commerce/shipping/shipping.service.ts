@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import type { ShippingQuote } from '@health/types';
+import { quoteShippingRates, type ShippingQuote } from '@health/types';
 import type { CreateShippingRateInput, OrderAddressInput } from '@health/validation';
 import { PrismaService } from '../../../infrastructure/prisma/prisma.service.js';
 import { AppException } from '../../../common/errors/app-exception.js';
@@ -46,33 +46,15 @@ export class ShippingService {
       orderBy: [{ position: 'asc' }, { priceCents: 'asc' }],
     });
 
-    const quotes: ShippingQuote[] = [];
-
-    for (const rate of candidates) {
-      // An empty region list means the whole country; a non-empty one is a
-      // allow-list of states.
-      if (rate.regions.length > 0 && !rate.regions.includes(context.address.region)) continue;
-
-      if (rate.minWeightGrams !== null && context.totalWeightGrams < rate.minWeightGrams) continue;
-      if (rate.maxWeightGrams !== null && context.totalWeightGrams > rate.maxWeightGrams) continue;
-      if (rate.minSubtotalCents !== null && context.subtotalCents < rate.minSubtotalCents) continue;
-      if (rate.maxSubtotalCents !== null && context.subtotalCents > rate.maxSubtotalCents) continue;
-
-      const free =
-        rate.freeAboveSubtotalCents !== null &&
-        context.subtotalCents >= rate.freeAboveSubtotalCents;
-
-      quotes.push({
-        code: rate.code,
-        name: rate.name,
-        description: rate.description,
-        priceCents: free ? 0 : rate.priceCents,
-        estimatedDaysMin: rate.estimatedDaysMin,
-        estimatedDaysMax: rate.estimatedDaysMax,
-      });
-    }
-
-    return quotes;
+    // Which rates apply is decided by a pure function in `@health/types`, not
+    // here, so that a subscription renewal charges the same delivery cost this
+    // quote showed at checkout. Two implementations of that rule would drift.
+    return quoteShippingRates(candidates, {
+      country: context.address.country,
+      region: context.address.region,
+      subtotalCents: context.subtotalCents,
+      totalWeightGrams: context.totalWeightGrams,
+    });
   }
 
   /**

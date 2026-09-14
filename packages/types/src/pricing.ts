@@ -1,4 +1,10 @@
-import { allocateCents, type Currency, type PricedLine, type PricedOrder } from './commerce.js';
+import {
+  allocateCents,
+  type Currency,
+  type PricedLine,
+  type PricedOrder,
+  type ShippingQuote,
+} from './commerce.js';
 
 /**
  * The pricing engine.
@@ -253,4 +259,79 @@ function fnv1a64(value: string): string {
   }
 
   return hash.toString(16).padStart(16, '0');
+}
+
+// ---------------------------------------------------------------------------
+// Shipping
+// ---------------------------------------------------------------------------
+
+/** A configured shipping rate, as stored. */
+export interface ShippingRateRule {
+  code: string;
+  name: string;
+  description: string | null;
+  countries: readonly string[];
+  regions: readonly string[];
+  priceCents: number;
+  freeAboveSubtotalCents: number | null;
+  minWeightGrams: number | null;
+  maxWeightGrams: number | null;
+  minSubtotalCents: number | null;
+  maxSubtotalCents: number | null;
+  estimatedDaysMin: number | null;
+  estimatedDaysMax: number | null;
+}
+
+export interface ShippingQuoteContext {
+  country: string;
+  region: string;
+  subtotalCents: number;
+  totalWeightGrams: number;
+}
+
+/**
+ * Which configured rates apply, and at what price.
+ *
+ * Pure, and separate from the service that reads the rates, for the same reason
+ * `priceOrder` is: a checkout quote, a re-quote at payment time and a
+ * subscription renewal must agree on delivery cost to the cent, and they only
+ * agree reliably if they run the same code. The caller supplies the rows; this
+ * decides.
+ *
+ * Free-shipping thresholds are applied here rather than as a discount, so the
+ * customer sees "Free" against the method instead of a line item that needs
+ * explaining.
+ */
+export function quoteShippingRates(
+  rates: readonly ShippingRateRule[],
+  context: ShippingQuoteContext,
+): ShippingQuote[] {
+  const quotes: ShippingQuote[] = [];
+
+  for (const rate of rates) {
+    if (!rate.countries.includes(context.country)) continue;
+
+    // An empty region list means the whole country; a non-empty one is an
+    // allow-list of states.
+    if (rate.regions.length > 0 && !rate.regions.includes(context.region)) continue;
+
+    if (rate.minWeightGrams !== null && context.totalWeightGrams < rate.minWeightGrams) continue;
+    if (rate.maxWeightGrams !== null && context.totalWeightGrams > rate.maxWeightGrams) continue;
+    if (rate.minSubtotalCents !== null && context.subtotalCents < rate.minSubtotalCents) continue;
+    if (rate.maxSubtotalCents !== null && context.subtotalCents > rate.maxSubtotalCents) continue;
+
+    const free =
+      rate.freeAboveSubtotalCents !== null && context.subtotalCents >= rate.freeAboveSubtotalCents;
+
+    quotes.push({
+      code: rate.code,
+      name: rate.name,
+      description: rate.description,
+      priceCents: free ? 0 : rate.priceCents,
+      estimatedDaysMin: rate.estimatedDaysMin,
+      estimatedDaysMax: rate.estimatedDaysMax,
+    });
+  }
+
+  return quotes;
 }

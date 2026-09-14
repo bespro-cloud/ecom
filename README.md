@@ -7,10 +7,14 @@ The compliance model — claims, evidence, batch traceability, recalls — is pa
 of the domain rather than something bolted on afterwards. That is the reason
 this is a custom platform and not a theme on a hosted cart.
 
-**Status: Phase 1 complete.** Identity, RBAC, MFA, auditing, configuration and
-the operational scaffolding are built and verified. The catalogue and commerce
-domains are next. See [docs/architecture/ROADMAP.md](docs/architecture/ROADMAP.md)
-for exactly what exists and what does not.
+**Status: Phases 1–5 complete.** Identity and RBAC; the catalogue with its
+publishing gate; cart, checkout, payments, orders, refunds, shipments, returns
+and inventory; claims, evidence, lot traceability and recalls; and the customer
+lifecycle — reviews, discount codes, subscriptions, support and account
+self-service. Growth (Phase 6), AI (Phase 7) and production hardening (Phase 8)
+are next. See [docs/architecture/ROADMAP.md](docs/architecture/ROADMAP.md) for
+exactly what exists and what does not — including what each phase deliberately
+did **not** build, and why.
 
 ## Getting started
 

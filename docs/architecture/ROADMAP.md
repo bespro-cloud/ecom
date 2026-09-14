@@ -324,9 +324,9 @@ queueing nothing that could reach a customer.
   sources. It does not weigh whether a study supports a sentence — that is the
   reviewer's job, and a confidence score would look like the software had formed
   a view people would then rely on.
-- **Recall notification dispatch.** There is no transactional email in the
-  platform, so nothing is sent. When there is, dispatch must remain a further
-  explicit act rather than a consequence of approval.
+- **Recall notification dispatch.** Nothing is sent. Phase 5 added transactional
+  email and deliberately did not wire recall notification to it: dispatch must
+  remain a further explicit act rather than a consequence of approval.
 - **Document verification.** A certificate's issuer and dates are recorded as
   claimed. Nothing checks them against a registry, and the API labels every
   document `NOT_VERIFIED_BY_THIS_SYSTEM` so no screen can imply otherwise.
@@ -341,10 +341,128 @@ queueing nothing that could reach a customer.
 
 ---
 
-## Phase 5 — Customer lifecycle 🔜 Next
+## Phase 5 — Customer lifecycle ✅ Complete
 
 Accounts, reviews with verified-purchase status, coupons, subscriptions,
-transactional email and SMS, support conversations.
+transactional email, support conversations.
+
+**Delivered**
+
+- Transactional email for the commerce lifecycle, dispatched from the
+  append-only outbox through BullMQ: order placed, order cancelled, payment
+  failed, refund issued, renewal failed, subscription unpaid, support replied
+- Product reviews that are never visible on the strength of being written —
+  every one is read by a moderator, and the response to the customer says so
+- Verified-purchase status derived from the reviewer's **own** order line, never
+  from a field on the request
+- Review moderation with written reasoning required on every outcome,
+  publication included, plus an adverse-event flag recorded independently of
+  whether the text is published
+- Discount codes priced entirely server-side: a request names a code, never an
+  amount, and what the code is worth is recomputed on every repricing
+- Redemption limits enforced by counting redemption rows under a row lock, not
+  by a counter
+- Subscriptions with recurring billing, off-session payment intents, bounded
+  dunning, and a `PAST_DUE` state that is billable but not shippable
+- One implementation of taking a recurring payment, in `@health/database`,
+  called by both the API and the scheduled billing run
+- Support conversations with staff internal notes excluded **in the query**, and
+  a medical redirect shown before the customer types rather than after
+- Account self-service: profile, consent history, a machine-readable data
+  export, and a deletion request decided by a named person with MFA
+- Storefront: reviews and ratings on product pages, a write-a-review flow,
+  discount-code entry at checkout, subscription management, support threads and
+  a privacy screen
+- Admin console: moderation queue, discount codes, subscriptions, support inbox
+  and the deletion-request queue
+
+**The rules that shaped it**
+
+**A review is not published by writing it.** There is no rating threshold that
+auto-approves, and no phrase list that auto-rejects. Wording that often signals
+a health claim puts a banner on the moderation screen and changes nothing else:
+a word list cannot tell whether "it cured my headache" is a disease claim in
+context, and code that acted on one would be making a regulatory decision by
+substring match.
+
+**The customer is told what will happen to their review.** A review that
+silently never appears reads as a bug, and on a regulated product the moderation
+is not something to be coy about.
+
+**No client ever names a discount.** The code is the entire input. The amount is
+looked up and recomputed server-side on every repricing, so there is no figure a
+request could supply and no stale number to drift from the basket. Percentages
+round **down**.
+
+**A renewal charges the price the customer agreed to.** Item prices live on the
+subscription and are not re-read from the catalogue. Charging more because a
+catalogue price moved is changing the terms without asking, which US
+auto-renewal statutes take a dim view of.
+
+**Cancelling is one button.** No retention flow, no required reason, no waiting
+period — each is a dark pattern the FTC has been explicit about, and the API
+would not enforce them anyway.
+
+**A failed renewal stops fulfilment immediately, and the retries are bounded.**
+Shipping against a payment that did not settle is the subscription equivalent of
+taking money for stock that is not there. When the schedule is exhausted the
+subscription is left `UNPAID` rather than retried forever.
+
+**Deleting an account does not delete the evidence.** Orders, payments, consent
+history and the record of which lots the customer received are retained — the
+last so a recall can still reach them, an obligation that does not lapse because
+somebody closed their account. Reviews are anonymised rather than deleted, so a
+published rating other customers rely on does not silently change.
+
+**Verified**
+
+| Suite                     | Count | Against                  |
+| ------------------------- | ----: | ------------------------ |
+| Shared package unit tests |   312 | pure logic               |
+| Storefront unit tests     |    45 | pure logic               |
+| API unit tests            |    67 | pure logic               |
+| Database integration      |    17 | real PostgreSQL          |
+| API integration (e2e)     |   275 | real PostgreSQL + Redis  |
+| Worker integration        |     9 | real PostgreSQL + BullMQ |
+
+The lifecycle suite proves the properties the phase exists for: a review is
+`PENDING` the moment it is written and no published row exists; a verified badge
+claimed against somebody else's order is refused rather than quietly dropped;
+the published rating average excludes unmoderated text; a client-supplied
+discount amount is ignored in favour of the coupon's own value; a percentage
+rounds down; two concurrent checkouts racing for the last remaining redemption
+produce exactly one winner; billing the same period three times produces one
+charge; a declined renewal moves the subscription to `PAST_DUE` and stops
+dispatch; the dunning schedule terminates at `UNPAID`; a cancelled or paused
+subscription is never billed; an internal staff note never appears in the
+customer's view of their own conversation; erasure keeps order, payment, consent
+and lot history while anonymising reviews; and the scheduled billing run — the
+real `listDueSubscriptions` followed by the real `billSubscriptionPeriod` —
+collects a due renewal and finds nothing due on the next pass.
+
+**Not done in Phase 5**
+
+- **SMS.** The provider abstraction and a console adapter exist from Phase 1;
+  no transactional message is sent over SMS, and nothing pretends one is.
+- **Review replies and helpfulness voting.** Not modelled.
+- **Subscription "skip this delivery".** Pause and resume exist; skipping a
+  single period does not.
+- **Changing what a subscriber pays.** A price change does not reach an existing
+  subscription at all, because doing so needs the subscriber's agreement and
+  that flow is not built. This is a deliberate omission, not an oversight: the
+  alternative is silently charging more.
+- **Proration.** Resuming starts a fresh period rather than back-charging for
+  the paused time; there is no mid-period upgrade to prorate.
+- **Coupon stacking**, BOGO and tiered promotions. One code per checkout.
+- **A card-entry element.** Subscriptions bill a provider token the browser
+  obtained by sending the card to the provider directly. With the development
+  adapter there is no such step, and the storefront has no field for a card
+  number by design — that is what keeps this application out of PCI DSS scope.
+- **Automated browser E2E (Playwright).** Still verified against running
+  services by hand. Now five phases overdue.
+- **Load testing.** No performance claim is made anywhere.
+
+---
 
 ## Phase 6 — Growth
 
