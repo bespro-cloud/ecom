@@ -42,6 +42,8 @@ const NAV: NavItem[] = [
   { href: '/analytics', label: 'Analytics', permission: 'ANALYTICS_READ' },
   { href: '/seo', label: 'SEO audit', permission: 'SEO_READ' },
   { href: '/redirects', label: 'Redirects', permission: 'SEO_READ' },
+  { href: '/ai', label: 'AI assistance', permission: 'AI_USE' },
+  { href: '/ai/log', label: 'AI interaction log', permission: 'AI_CONFIGURE' },
   { href: '/audit', label: 'Audit log', permission: 'AUDIT_READ' },
   { href: '/settings', label: 'Settings & flags', permission: 'SYSTEM_SETTINGS' },
 ];

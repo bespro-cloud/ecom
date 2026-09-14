@@ -107,6 +107,7 @@ export const SYSTEM_ROLES: readonly SystemRoleDefinition[] = [
       'AUDIT_READ',
       'SYSTEM_SETTINGS',
       'AI_USE',
+      'AI_CONFIGURE',
       'SUPPORT_READ',
       'SUPPORT_WRITE',
     ),
@@ -141,6 +142,10 @@ export const SYSTEM_ROLES: readonly SystemRoleDefinition[] = [
       'BATCH_READ',
       'BATCH_QUARANTINE',
       'AUDIT_READ',
+      // Reads evidence digests. The digest saves reading time; it does not
+      // save judgement, and it is forbidden from offering an opinion on
+      // whether evidence substantiates anything.
+      'AI_USE',
     ),
     requiresMfa: true,
   },
@@ -168,6 +173,9 @@ export const SYSTEM_ROLES: readonly SystemRoleDefinition[] = [
       'SEO_READ',
       'SEO_WRITE',
       'ANALYTICS_READ',
+      // Drafts product copy and SEO metadata. Drafting only: accepting a
+      // suggestion writes to a draft, and publishing is still PRODUCT_PUBLISH.
+      'AI_USE',
     ),
     requiresMfa: false,
   },
@@ -280,7 +288,15 @@ export const SYSTEM_ROLES: readonly SystemRoleDefinition[] = [
     key: 'ANALYST',
     name: 'Analyst',
     description: 'Read-only analytics access. No customer PII write access.',
-    permissions: keys('ANALYTICS_READ', 'PRODUCT_READ', 'ORDER_READ', 'INVENTORY_READ'),
+    permissions: keys(
+      'ANALYTICS_READ',
+      'PRODUCT_READ',
+      'ORDER_READ',
+      'INVENTORY_READ',
+      // Narrates figures that have already been computed. It cannot compute
+      // any: the gateway has no tools and the numbers go in the prompt.
+      'AI_USE',
+    ),
     requiresMfa: false,
   },
   {

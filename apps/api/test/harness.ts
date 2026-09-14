@@ -17,7 +17,12 @@ export interface TestHarness {
 }
 
 const TRUNCATABLE = [
-  // Growth first: analytics events reference products, and blog reviews
+  // AI first: a suggestion references an interaction, and interactions
+  // reference nothing else.
+  'ai_suggestions',
+  'ai_interactions',
+
+  // Growth next: analytics events reference products, and blog reviews
   // reference posts.
   'analytics_events',
   'analytics_sessions',
@@ -124,6 +129,7 @@ const APPEND_ONLY = [
   'subscription_events',
   'support_messages',
   'blog_post_reviews',
+  'ai_interactions',
 ];
 
 export async function createHarness(): Promise<TestHarness> {

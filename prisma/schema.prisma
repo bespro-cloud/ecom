@@ -3300,3 +3300,156 @@ model Redirect {
   @@index([isActive, fromPath])
   @@map("redirects")
 }
+
+// ===========================================================================
+// Phase 7 — AI
+//
+// The most dangerous subsystem here, and the schema is shaped accordingly.
+//
+// A language model asked about a supplement produces a fluent, confident
+// paragraph whether or not it has any basis for one. On a site selling
+// regulated health products that paragraph is an unapproved health claim in the
+// most convincing possible format, and the failure is silent because a
+// fabrication reads exactly like a fact.
+//
+// So: **AI never completes an action.** Every output is a suggestion a named
+// person accepts. There is no table here the model writes to except its own
+// audit trail and its own suggestion queue, and applying a suggestion writes
+// descriptive text to a draft. Nothing in this section can approve a claim,
+// change a compliance status, publish a page, move money or move stock.
+//
+// Every call is recorded whether it succeeded, was blocked, was refused before
+// the call, or failed — append-only, because "what did we ask it and what did
+// it say?" is the question that gets asked after something goes wrong.
+// ===========================================================================
+
+enum AiOutcomeValue {
+  COMPLETED
+  /// The guardrails refused the output. The text is kept, unusable, with the findings.
+  BLOCKED
+  /// Retrieval was empty, so no model was called at all.
+  NO_GROUNDING
+  /// Budget or rate limit refused it before the call.
+  REFUSED
+  FAILED
+}
+
+/// One call to a model — or one decision not to make a call.
+///
+/// Append-only. Database triggers reject UPDATE and DELETE, so the record of
+/// what was asked and what came back cannot be tidied up afterwards.
+///
+/// The prompt stored here is the **redacted** one, exactly as sent. Storing the
+/// original would put customer data in the one table that is never deleted, and
+/// storing nothing would make the trail useless.
+model AiInteraction {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  /// One of the declared purposes. A CHECK keeps the list closed, so a future
+  /// code path cannot invent a use nobody reviewed.
+  purpose String
+
+  outcome AiOutcomeValue
+
+  provider    String
+  model       String
+  /// False when the development stand-in produced this. Recorded on the row so
+  /// no screen can present stand-in text as model output.
+  isRealModel Boolean @default(false) @map("is_real_model")
+
+  /// Exactly what was sent, after redaction.
+  systemPrompt String  @map("system_prompt")
+  userPrompt   String  @map("user_prompt")
+  /// True when redaction actually removed something, so the trail says so.
+  wasRedacted  Boolean @default(false) @map("was_redacted")
+
+  /// What came back. Kept even when blocked — especially when blocked.
+  responseText String? @map("response_text")
+
+  /// Which approved records were retrieved and put in the prompt. The answer to
+  /// "what was this grounded in?".
+  retrievedIds String[] @default([]) @map("retrieved_ids")
+
+  /// Guardrail findings, as recorded by the scan. Advisory findings included.
+  guardrailFindings Json?   @map("guardrail_findings")
+  /// Set when the output was refused, so the reason survives.
+  blockedReason     String? @map("blocked_reason")
+
+  inputTokens  Int @default(0) @map("input_tokens")
+  outputTokens Int @default(0) @map("output_tokens")
+  /// Hundredths of a cent. Integer, like every other money figure here.
+  costMicros   Int @default(0) @map("cost_micros")
+  latencyMs    Int @default(0) @map("latency_ms")
+
+  /// Who asked. Always a named staff member — there is no customer-facing AI in
+  /// this platform, and nothing here runs unattended.
+  actorId    String @map("actor_id") @db.Uuid
+  actorLabel String @map("actor_label")
+
+  /// The UTC day, denormalised for the budget query.
+  day String
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  suggestion AiSuggestion?
+
+  @@index([day, actorId])
+  @@index([purpose, createdAt])
+  @@index([outcome, createdAt])
+  @@map("ai_interactions")
+}
+
+enum AiSuggestionStatusValue {
+  PENDING
+  ACCEPTED
+  REJECTED
+  /// The guardrails refused it. It exists so the refusal is visible and
+  /// auditable, and it can never be accepted.
+  BLOCKED
+}
+
+/// Something a model proposed, waiting for a person.
+///
+/// The `kind` enum is the enforcement: every member writes descriptive text to
+/// a draft. There is deliberately no kind that approves, publishes, refunds or
+/// adjusts anything.
+///
+/// Accepting is an act by a named human who becomes responsible for the words.
+/// That is the whole point — not a rubber stamp, but the person whose name goes
+/// on the copy.
+model AiSuggestion {
+  id            String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  interactionId String @unique @map("interaction_id") @db.Uuid
+
+  /// A closed set, enforced by a CHECK as well as by the application.
+  kind   String
+  status AiSuggestionStatusValue @default(PENDING)
+
+  /// What this would change, when it changes anything. Free-form because the
+  /// targets differ; nothing is dereferenced without checking the kind.
+  targetType String? @map("target_type")
+  targetId   String? @map("target_id") @db.Uuid
+
+  /// The proposed text. Shown to a person; never applied by the model.
+  content Json
+
+  /// Who asked for it.
+  requestedById    String @map("requested_by_id") @db.Uuid
+  requestedByLabel String @map("requested_by_label")
+
+  /// Who decided, and why. A rejection reason is optional; an acceptance is a
+  /// statement that this person stands behind the words.
+  decidedById    String?   @map("decided_by_id") @db.Uuid
+  decidedByLabel String?   @map("decided_by_label")
+  decidedAt      DateTime? @map("decided_at") @db.Timestamptz(6)
+  decisionNotes  String?   @map("decision_notes")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  interaction AiInteraction @relation(fields: [interactionId], references: [id], onDelete: Cascade)
+
+  @@index([status, createdAt])
+  @@index([requestedById, createdAt])
+  @@map("ai_suggestions")
+}

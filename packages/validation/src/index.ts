@@ -8,3 +8,4 @@ export * from './commerce.js';
 export * from './compliance.js';
 export * from './lifecycle.js';
 export * from './growth.js';
+export * from './ai.js';

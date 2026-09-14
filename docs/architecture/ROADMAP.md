@@ -594,14 +594,138 @@ description without writing one.
 
 ---
 
-## Phase 7 — AI
+## Phase 7 — AI ✅ Complete
 
 Gateway, RAG over _approved_ knowledge only, content and SEO assistance,
 analytics summarisation, guardrails and AI audit logs.
 
-AI may draft, summarise and retrieve. It may never approve a claim, change
-compliance status, invent evidence, diagnose, or issue a refund. Sensitive
-actions produce a task for a human, never a completed action.
+**Delivered**
+
+- A single gateway through which every model call passes. There is no second
+  path: the provider is not injectable anywhere else, and the services that
+  offer assistance hold the gateway rather than a client
+- Seven purposes, enumerated in code and enforced by a database CHECK, covering
+  evidence digests, product copy, SEO metadata, blog outlines, analytics
+  narration, support reply drafts and answering staff questions from approved
+  records
+- Retrieval restricted to records a person already approved — approved claim
+  versions, accepted evidence, published pages, posts and product facts — and
+  scoped a second time to the permissions the asking staff member holds
+- Guardrails that scan every output before anybody is offered it, for disease
+  claims, FDA and regulatory claims, clinical advice, fabricated citations,
+  ungrounded assertions and approval language. Blocked text is recorded and
+  never returned
+- Redaction before the request, not after: emails, phone numbers, addresses,
+  order and customer references are replaced with placeholders, and the
+  redacted prompt is the only one stored
+- A suggestion queue in five kinds, none of which can publish, approve, refund
+  or moderate — enforced by a CHECK, not by convention
+- An append-only interaction log covering calls that succeeded, calls that were
+  blocked, calls that failed, and calls that were never made
+- A daily budget in micros and an hourly per-person rate limit, both computed
+  from the log rather than a counter
+- A development stand-in with trigger phrases that make the guardrails fail in
+  the shapes they exist for, refused in production by the environment contract
+- Admin console: the suggestion queue with blocked output visible, and an
+  interaction log with spend, outcomes and the redacted prompts
+
+**The rules that shaped it**
+
+**There is no customer-facing AI, and that is the decision this phase turns
+on.** A storefront assistant asked "will this help my anxiety?" would retrieve
+approved structure/function claims and assemble them into an answer addressed to
+a stated condition. Each retrieved sentence would be individually approved and
+the answer would still be a health claim made to a specific person about their
+specific symptom — the thing the whole compliance apparatus exists to prevent.
+It would also be a channel collecting health information the business has no
+lawful basis to hold. So every route requires `AI_USE` and a staff session, and
+the support route drafts text for an agent to edit rather than anything that is
+sent.
+
+**AI never completes an action; it produces text somebody else acts on.** This
+is structural rather than procedural. The suggestion kinds are an enumerated
+list with no member that could publish, approve, refund, moderate or grant, and
+a CHECK constraint rejects any other value. Accepting a suggestion writes to a
+_draft_. Publishing that draft is a separate act by somebody holding the
+permission for it, with the same gates as text a person typed — which is how
+this reconciles with Phase 6's rule that copy is never generated: a model may
+propose words, and only a named human puts them on a page.
+
+**Empty retrieval means no model call at all.** The failure mode that matters is
+not a model that refuses; it is a model that answers a supplement question
+fluently from memory when the records held nothing. So retrieval runs first, and
+when it comes back empty the gateway returns a fixed sentence saying so and
+records an interaction with outcome `NO_GROUNDING` and zero cost. A constraint
+asserts an uncalled interaction is free, so the row cannot quietly be something
+else.
+
+**Prompts are the seatbelt, not the crash barrier.** The system prompts say what
+the boundary is, and nothing depends on the model honouring them. Citations are
+verified against the identifiers actually retrieved, so an invented reference is
+caught by string comparison. Assertions in a grounded answer are checked for
+support. The output scan is a regex pass over text a person has not seen yet.
+Each of these works if the model ignores every instruction it was given.
+
+**The provider interface has no tools.** There is no function-calling surface,
+so there is no code path by which a model's output becomes a call into this
+application. That is a smaller interface than the SDKs offer and it is the
+point: the absence is what makes "AI cannot change anything" a property of the
+wiring rather than a promise about prompts.
+
+**Everything is logged, including what did not happen.** The interaction table
+is append-only by trigger and records the redacted prompt, the retrieved
+identifiers, the outcome, the guardrail findings, the tokens, the cost and who
+asked. A blocked answer is kept — the near-misses are the evidence for whether
+the guardrails are calibrated, and a log that only held successes would flatter
+the system.
+
+**Verified**
+
+| Suite                     | Count | Against                  |
+| ------------------------- | ----: | ------------------------ |
+| Shared package unit tests |   400 | pure logic               |
+| Storefront unit tests     |    45 | pure logic               |
+| API unit tests            |    67 | pure logic               |
+| Database integration      |    17 | real PostgreSQL          |
+| API integration (e2e)     |   363 | real PostgreSQL + Redis  |
+| Worker integration        |     9 | real PostgreSQL + BullMQ |
+
+The AI suite proves the refusals rather than the happy path: a question no
+approved record matches returns a fixed sentence and no request is sent; a
+customer session cannot reach any AI route; a staff member without
+`EVIDENCE_READ` gets an answer with no evidence in it, where one with the
+permission gets evidence from the same question; output containing a disease
+claim is blocked and the text never reaches the caller; a fabricated citation is
+caught by comparing it against what was retrieved; an evidence digest will not
+state whether the evidence substantiates the claim; accepting a suggestion
+changes a draft and nothing published; a blocked suggestion cannot be accepted
+through the API and a direct `UPDATE` marking it accepted is rejected by a
+trigger; the interaction log refuses updates and deletes; a prompt containing a
+customer email is stored with the address redacted; the daily budget refuses the
+call that would exceed it; and no suggestion kind or purpose corresponds to
+anything on the prohibited list.
+
+**Not done in Phase 7**
+
+- **Vector retrieval.** Search is lexical — Postgres matching over approved
+  records. A question phrased unlike the source text retrieves less than
+  embeddings would. It was chosen because the approved-only filter stays a SQL
+  predicate anyone can read and no copy of approved text is shipped to a third
+  party for indexing. A vector index is the obvious next improvement and is not
+  pretended to exist.
+- **Customer-facing assistance of any kind.** Covered above. Not a backlog item.
+- **Automatic application of suggestions.** Every one waits for a person. A
+  "trusted purposes auto-apply" setting would be the hole the rest of this phase
+  is built to avoid.
+- **Model fine-tuning or any training on platform data.** Nothing is sent
+  anywhere for training, and the provider call sets no such option.
+- **Streaming responses.** Guardrails scan complete text. Streaming means
+  showing a person words before they have been checked.
+- **Automated browser E2E (Playwright).** Still verified against running
+  services by hand. Now seven phases overdue.
+- **Load testing.** No performance claim is made anywhere.
+
+---
 
 ## Phase 8 — Production hardening
 

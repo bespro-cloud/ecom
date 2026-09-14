@@ -235,6 +235,22 @@ export const GROWTH_AUDIT_ACTIONS = {
   ANALYTICS_RETENTION_PRUNED: 'analytics.retention.pruned',
 } as const;
 
+/**
+ * Phase 7 — AI.
+ *
+ * Accepting a suggestion is the audited act, not generating one. Generating is
+ * recorded in `ai_interactions`, which is append-only and holds the prompt, the
+ * response and the guardrail findings; duplicating that into the audit log
+ * would be noise. Acceptance is different: it is the moment a machine's words
+ * become a person's, and "who put their name to this?" is the question that
+ * gets asked later.
+ */
+export const AI_AUDIT_ACTIONS = {
+  SUGGESTION_ACCEPTED: 'ai.suggestion.accepted',
+  SUGGESTION_REJECTED: 'ai.suggestion.rejected',
+  SETTINGS_CHANGED: 'ai.settings.changed',
+} as const;
+
 export const ALL_AUDIT_ACTIONS = {
   ...AUDIT_ACTIONS,
   ...CATALOGUE_AUDIT_ACTIONS,
@@ -242,6 +258,7 @@ export const ALL_AUDIT_ACTIONS = {
   ...COMPLIANCE_AUDIT_ACTIONS,
   ...LIFECYCLE_AUDIT_ACTIONS,
   ...GROWTH_AUDIT_ACTIONS,
+  ...AI_AUDIT_ACTIONS,
 } as const;
 
 export type AuditAction = (typeof ALL_AUDIT_ACTIONS)[keyof typeof ALL_AUDIT_ACTIONS];
@@ -302,4 +319,7 @@ export const NOTABLE_AUDIT_ACTIONS: readonly AuditAction[] = [
   // regulated product on a public page, on somebody's named approval.
   GROWTH_AUDIT_ACTIONS.BLOG_POST_PUBLISHED,
   GROWTH_AUDIT_ACTIONS.BLOG_POST_APPROVED,
+  // Somebody put their name to text a model produced. On a site selling
+  // regulated products that is worth being able to find later.
+  AI_AUDIT_ACTIONS.SUGGESTION_ACCEPTED,
 ];

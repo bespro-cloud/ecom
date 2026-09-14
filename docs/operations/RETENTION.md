@@ -25,17 +25,22 @@ with counsel, considering:
 
 Once decided, record them here and implement them as a scheduled privileged job.
 
-| Data                       | Period      | Basis                   |
-| -------------------------- | ----------- | ----------------------- |
-| Audit log                  | _to be set_ | Security and regulatory |
-| Consent ledger             | _to be set_ | Proof of permission     |
-| Claim and evidence history | Indefinite  | Substantiation          |
-| Recall records             | Indefinite  | Regulatory              |
-| Order and payment records  | _to be set_ | Tax law                 |
-| Sessions and tokens        | 60 days     | Already automated       |
-| Analytics events           | _to be set_ | Business need           |
+| Data                       | Period      | Basis                    |
+| -------------------------- | ----------- | ------------------------ |
+| Audit log                  | _to be set_ | Security and regulatory  |
+| Consent ledger             | _to be set_ | Proof of permission      |
+| Claim and evidence history | Indefinite  | Substantiation           |
+| Recall records             | Indefinite  | Regulatory               |
+| Order and payment records  | _to be set_ | Tax law                  |
+| Sessions and tokens        | 60 days     | Already automated        |
+| Analytics events           | 30 days     | Already automated        |
+| AI interaction log         | _to be set_ | Oversight of the feature |
 
 Sessions and expired tokens are already pruned by the worker's maintenance jobs.
+Raw analytics events and their daily salts are deleted after 30 days by the
+worker's retention sweep; the rollups that outlive them are counts. The AI
+interaction log is append-only and the application cannot delete from it, so
+trimming it is an out-of-band operation like the audit log.
 Everything marked _to be set_ is currently retained indefinitely, which is the
 safe default but not a permanent answer.
 

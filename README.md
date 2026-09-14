@@ -7,14 +7,17 @@ The compliance model — claims, evidence, batch traceability, recalls — is pa
 of the domain rather than something bolted on afterwards. That is the reason
 this is a custom platform and not a theme on a hosted cart.
 
-**Status: Phases 1–6 complete.** Identity and RBAC; the catalogue with its
+**Status: Phases 1–7 complete.** Identity and RBAC; the catalogue with its
 publishing gate; cart, checkout, payments, orders, refunds, shipments, returns
-and inventory; claims, evidence, lot traceability and recalls; and the customer
+and inventory; claims, evidence, lot traceability and recalls; the customer
 lifecycle of reviews, discount codes, subscriptions, support and account
-self-service; and first-party analytics, a compliance-gated blog, automatic
-redirects and SEO tooling. AI (Phase 7) and production hardening (Phase 8) are next. See [docs/architecture/ROADMAP.md](docs/architecture/ROADMAP.md) for
-exactly what exists and what does not — including what each phase deliberately
-did **not** build, and why.
+self-service; first-party analytics, a compliance-gated blog, automatic
+redirects and SEO tooling; and staff-only AI assistance that drafts and
+summarises from approved records and can change nothing on its own. Production
+hardening (Phase 8) is next. See
+[docs/architecture/ROADMAP.md](docs/architecture/ROADMAP.md) for exactly what
+exists and what does not — including what each phase deliberately did **not**
+build, and why.
 
 ## Getting started
 
@@ -51,6 +54,9 @@ packages/
   config/       Environment contract, clock, log redaction.
   auth/         Hashing, tokens, TOTP, envelope encryption.
   notifications/ Email and SMS abstraction plus templates.
+  payments/     Payment provider abstraction and adapters.
+  storage/      Object storage abstraction and adapters.
+  ai/           Model provider abstraction. No tools, by design.
   ui/           Shared accessible React primitives.
 ```
 

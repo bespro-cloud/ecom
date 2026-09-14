@@ -31,6 +31,6 @@ import { GrowthAdminController } from './growth-admin.controller.js';
     RedirectsService,
     SeoAuditService,
   ],
-  exports: [AnalyticsCollectionService, RedirectsService, BlogService],
+  exports: [AnalyticsCollectionService, RedirectsService, BlogService, AnalyticsReportingService],
 })
 export class GrowthModule {}

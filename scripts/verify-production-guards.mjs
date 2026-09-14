@@ -47,6 +47,14 @@ const mustBeRejected = [
   ['a payment provider with no webhook secret', { PAYMENT_WEBHOOK_SECRET: undefined }],
   ['the filesystem storage provider', { STORAGE_PROVIDER: 'filesystem' }],
   ['S3 storage with no bucket', { S3_BUCKET: undefined }],
+  // AI. The stand-in produces text that is not model output; a deployment
+  // running it would be labelling stand-in prose as generated content.
+  ['the development AI stand-in', { AI_PROVIDER: 'development', AI_DAILY_BUDGET_MICROS: '100000' }],
+  ['a real AI provider with no key', { AI_PROVIDER: 'anthropic', AI_DAILY_BUDGET_MICROS: '100000' }],
+  // A provider with no budget cannot make a call. Failing at boot is kinder
+  // than failing on every request with a message about a setting nobody knew
+  // existed.
+  ['an AI provider with no budget', { AI_PROVIDER: 'anthropic', AI_API_KEY: 'k' }],
 ];
 
 let failures = 0;

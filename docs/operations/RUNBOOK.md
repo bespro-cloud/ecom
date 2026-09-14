@@ -211,6 +211,48 @@ not.
 
 ---
 
+## AI assistance failing or refusing
+
+**Symptom:** staff report the assistant saying it cannot answer, or the console
+showing refusals.
+
+There is no severity here: **nothing in the platform depends on AI.** Orders,
+compliance, publishing and support all work with `AI_PROVIDER=disabled`. Treat
+this as a degraded convenience, not an outage.
+
+Read the outcome breakdown first — it distinguishes four different situations
+that look identical to the person who asked.
+
+```sh
+curl -s -H "Authorization: Bearer $TOKEN" \
+  https://api.example.com/api/v1/admin/ai/usage | jq '.byOutcome, .spentMicros, .limitMicros'
+```
+
+| Outcome        | What happened                                      | Action                                                                 |
+| -------------- | -------------------------------------------------- | ---------------------------------------------------------------------- |
+| `NO_GROUNDING` | Retrieval matched no approved record; no call made | Working as designed. The records do not cover the question.            |
+| `BLOCKED`      | Output failed the guardrails and was withheld      | Read the findings. A rising rate means prompts or retrieval need work. |
+| `FAILED`       | The provider errored after retries                 | Provider status; check `AI_API_KEY` and timeouts.                      |
+| `REFUSED`      | Budget or rate limit                               | See below.                                                             |
+
+**Budget exhausted.** `remainingMicros` at zero means the daily limit is spent
+and calls are refused until UTC midnight. Raising `AI_DAILY_BUDGET_MICROS`
+requires a restart and is a spending decision — check the `byPurpose` breakdown
+first, because a single purpose consuming the day's budget is usually a loop
+rather than demand.
+
+**A rising `BLOCKED` rate is a signal, not a fault.** Read the findings in
+`GET /admin/ai/interactions`. If the blocks are disease claims in product copy
+drafts, the guardrails are doing exactly their job and the answer is not to
+loosen them. Never relax a guardrail to clear an alert; the blocked text was
+withheld from a person who would otherwise have been offered it.
+
+**Do not** work around an AI outage by publishing unreviewed text. The whole
+design assumes a person writes or accepts every word that reaches a customer,
+and an incident is the worst moment to make an exception.
+
+---
+
 ## Login failure spike
 
 **Alert:** `LoginFailureSpike`

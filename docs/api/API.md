@@ -1000,6 +1000,103 @@ The audit names the gap; a person writes the words.
 excludes anything marked `noindex` at the source — a sitemap must not contradict
 a page's own robots directive.
 
+## AI assistance
+
+Every route is staff-only and requires `AI_USE` on top of the permission for the
+thing being drafted.
+
+| Endpoint                                  | Permission                  |
+| ----------------------------------------- | --------------------------- |
+| `GET /admin/ai/status`                    | `AI_USE`                    |
+| `POST /admin/ai/ask`                      | `AI_USE`                    |
+| `POST /admin/ai/evidence-digest`          | `AI_USE` + `EVIDENCE_READ`  |
+| `POST /admin/ai/product-copy`             | `AI_USE` + `PRODUCT_WRITE`  |
+| `POST /admin/ai/seo-metadata`             | `AI_USE` + `SEO_WRITE`      |
+| `POST /admin/ai/blog-outline`             | `AI_USE` + `BLOG_WRITE`     |
+| `POST /admin/ai/support-reply`            | `AI_USE` + `SUPPORT_WRITE`  |
+| `POST /admin/ai/analytics-summary`        | `AI_USE` + `ANALYTICS_READ` |
+| `GET /admin/ai/suggestions`               | `AI_USE`                    |
+| `GET /admin/ai/suggestions/:id`           | `AI_USE`                    |
+| `POST /admin/ai/suggestions/:id/decision` | `AI_USE`                    |
+| `GET /admin/ai/interactions`              | `AI_CONFIGURE`              |
+| `GET /admin/ai/usage`                     | `AI_CONFIGURE`              |
+
+**There is no customer-facing AI endpoint, and there is no plan for one.** An
+assistant asked "will this help my anxiety?" would retrieve approved claims and
+assemble them into an answer addressed to a stated condition — a health claim
+made to one person about their symptom, which is what every gate in this
+platform exists to prevent. It would also be a channel collecting health
+information there is no lawful basis to hold. The support route drafts text for
+an agent to read and edit; it sends nothing.
+
+**Every route returns a suggestion. None of them changes anything.** A
+suggestion has one of five kinds, and no kind can publish, approve, refund,
+moderate or grant a permission. That is a CHECK constraint on the table, not a
+convention — `PROHIBITED_OF_AI` in `@health/types` lists what is out of scope and
+a unit test asserts no purpose and no suggestion kind corresponds to any entry.
+
+`POST /admin/ai/suggestions/:id/decision` is where machine text becomes a
+person's: `accept` records who accepted and applies the content to a **draft**.
+Publishing that draft is a separate act, through the same gate any typed text
+goes through — a blog post naming a product still needs `COMPLIANCE_APPROVE`, a
+product still needs the publishing checklist. A suggestion the guardrails
+blocked cannot be accepted: the API refuses it and a trigger refuses it if the
+API is bypassed.
+
+### What happens on a request
+
+1. **Enabled?** `AI_PROVIDER=disabled` is a supported configuration. Routes
+   return a plain refusal rather than an error.
+2. **Redact.** Emails, phone numbers, addresses, and customer and order
+   references are replaced with placeholders **before** the request is built.
+   The redacted prompt is the only one that is ever stored.
+3. **Ground.** Retrieval runs over approved records only — approved claim
+   versions, accepted evidence, published pages and posts, descriptive product
+   facts — filtered again by the permissions the asking staff member holds, so
+   an answer cannot become an authorisation bypass. **If retrieval returns
+   nothing, no model is called.** The response is a fixed sentence and the
+   interaction is logged with outcome `NO_GROUNDING` and zero cost.
+4. **Budget.** A daily spend limit in micros and an hourly per-person rate
+   limit, both computed from the append-only log rather than a counter that a
+   restart could reset.
+5. **Call,** with a timeout and bounded retries on transient failures only.
+6. **Scan.** The output is checked for disease claims, FDA and regulatory
+   claims, clinical advice, approval language, citations that name nothing
+   retrieved, and assertions with no support in the retrieved text. A blocking
+   finding means the text is never returned to the caller — it is recorded so
+   the near-miss is reviewable, and the suggestion is created `BLOCKED`.
+7. **Record.** One append-only row either way, including for the calls that were
+   never made.
+
+The provider interface has no tools or function-calling surface. There is no
+path by which model output becomes a call into this application.
+
+### Retrieval is lexical, not semantic
+
+Search matches terms against approved records in SQL. A question phrased
+unlike the source text will retrieve less than a vector search would. This is
+a real limitation and is stated rather than hidden: it was chosen so the
+approved-only filter stays a predicate anybody can read in the query, and so no
+copy of approved text is shipped elsewhere to be indexed.
+
+### Cost and configuration
+
+`AI_PROVIDER` is `disabled`, `development` or `anthropic`. The `development`
+stand-in is refused in production by the environment contract, the same way the
+mock payment provider is, and its output is labelled on every screen that shows
+it. `anthropic` requires `AI_API_KEY`, and any enabled provider requires a
+non-zero `AI_DAILY_BUDGET_MICROS` — an AI feature with no spending limit is an
+outage waiting for a loop.
+
+Cost is stored in micros (hundredths of a cent) as integers, priced from
+`AI_INPUT_PRICE_MICROS` and `AI_OUTPUT_PRICE_MICROS`. `GET /admin/ai/usage`
+reports today's spend, remaining budget, and counts by outcome and purpose.
+
+`GET /admin/ai/interactions` is append-only and includes the redacted prompts,
+the retrieved identifiers, guardrail findings and blocked text. A subsystem
+whose audit trail holds only its successes is worse than none, because it looks
+complete.
+
 ## Audit
 
 `GET /audit-logs` · `AUDIT_READ`

@@ -540,29 +540,76 @@ structured data, and an audit that reports missing titles, missing descriptions,
 missing alternative text, duplicate titles and published pages excluded from the
 index.
 
-**No copy is generated, anywhere.** Not a meta description, not a title, not
-alternative text, not a snippet. A meta description for a supplement is a public
-statement about a health product, and a generated one is exactly the fluent,
-plausible sentence that ends up making a claim nobody reviewed and no evidence
-supports. The audit reports the gap and a person writes the words — and the
-admin screen says so, so nobody adds a "generate" button later without meeting
-the argument.
+**No copy is generated and published, anywhere.** Not a meta description, not a
+title, not alternative text, not a snippet. A meta description for a supplement
+is a public statement about a health product, and one that appeared on the site
+without a person writing or reading it is exactly the fluent, plausible sentence
+that ends up making a claim nobody reviewed and no evidence supports. The audit
+reports the gap; it never fills it.
 
-## What AI may and may not do (Phase 7)
+Phase 7 added assistance that can _draft_ such text, and does not weaken this
+rule. A draft is not copy: it sits in a queue, it is labelled as machine-written
+on screen, and a named person accepts it — which is the act that puts the words
+anywhere. Nothing applies a suggestion automatically, and there is no setting
+that would.
 
-May: summarise approved evidence, draft content for human review, answer
-questions from approved knowledge, analyse sales.
+### What AI may and may not do (built, Phase 7)
 
-May not: approve a claim, change compliance status, invent evidence or
-certifications, assert FDA approval, diagnose, prescribe, alter dosage, issue
-refunds, adjust inventory, or bypass RBAC.
+**May:** summarise evidence a reviewer has already accepted, draft product copy,
+SEO metadata, blog outlines and support replies for a person to edit, narrate
+figures that have already been computed, and answer a staff question from
+approved records with citations.
 
-For anything sensitive, AI creates a task for a human. It never completes the
-action.
+**May not:** approve or reject a claim, change a compliance status, decide
+whether evidence substantiates a claim, publish anything, moderate a review,
+approve a post that names a product, issue a refund, adjust inventory or release
+quarantined stock, approve recall contact, decide an erasure request, grant or
+bypass a permission, or answer a customer's question about their own health.
 
-When the system lacks sufficient approved information to answer a health-related
-question, it must say so. A plausible-sounding fabrication about a supplement is
-worse than no answer.
+That second list is not a policy in a document. It is `PROHIBITED_OF_AI` in the
+type package, and the property that enforces it is that **no suggestion kind
+exists that could carry any of them out**. The five kinds are product
+description, SEO metadata, blog outline, support reply and advisory note; a
+database CHECK rejects any other value, and a unit test asserts no purpose and no
+kind corresponds to a prohibited entry. There is no request that expresses
+"approve this claim", so there is nothing to disable and nothing to misconfigure.
+
+**AI never completes an action.** Accepting a suggestion writes to a draft and
+records who accepted it. Everything downstream — publishing a product, approving
+a post that names one, sending a support message — runs the gate it always ran,
+on the authority of the person who does it. The accepting staff member owns the
+words from that moment, and the screen says so before they click.
+
+**There is no customer-facing AI.** An assistant asked "will this help my
+anxiety?" would retrieve individually-approved structure/function claims and
+assemble them into an answer addressed to a stated condition. Each sentence
+would be approved and the answer would still be a health claim made to one
+person about their symptom — and it would be a channel collecting health
+information there is no lawful basis to hold. Every route requires a staff
+session.
+
+**When there is nothing approved to answer from, no model is called.** Retrieval
+runs before the request; if it returns nothing, the response is a fixed sentence
+saying the approved records do not cover the question, and the interaction is
+logged as `NO_GROUNDING` at zero cost. A plausible-sounding fabrication about a
+supplement is worse than no answer, and a model with nothing in front of it is
+exactly where one comes from.
+
+**Output is checked before anybody reads it.** Disease claims, assertions of FDA
+approval or other regulatory status, clinical advice, approval language,
+citations naming nothing that was retrieved, and assertions unsupported by the
+retrieved text are all blocking findings. Blocked text is never returned to the
+person who asked. It is kept in the log, because the near-misses are the
+evidence for whether the guardrails are calibrated.
+
+**Customer data is redacted before the request leaves.** Emails, phone numbers,
+addresses, and customer and order references are replaced with placeholders, and
+the redacted prompt is the only one stored. A support thread summarised for an
+agent goes to the provider without the customer's identity in it.
+
+**Every call is audited, including the ones that did not happen.** The
+interaction log is append-only by trigger and records the redacted prompt, what
+was retrieved, the outcome, the guardrail findings, the cost and who asked.
 
 ## Data protection
 
@@ -574,7 +621,9 @@ worse than no answer.
   URLs, browser storage or error messages. From Phase 6 this is structural for
   analytics rather than a rule to remember: the tables have no identity columns,
   a database trigger refuses to let any be added, and query strings never reach
-  storage.
+  storage. From Phase 7 it is structural for AI too: prompts are redacted before
+  the request is built, the redacted copy is the only one stored, and no
+  customer can reach an AI route to describe a symptom in the first place.
 - There is no third-party analytics, advertising pixel or tag manager on the
   storefront, and adding one would defeat every guarantee above.
 - Consent history is retained as evidence and is not deleted by the application.
@@ -594,6 +643,7 @@ worse than no answer.
 | Subscription events          | Per policy   | What a subscriber was charged, when |
 | Erasure decisions            | Indefinitely | The response to a legal request     |
 | Order and payment records    | Per tax law  | Financial and tax obligations       |
+| AI interaction log           | Per policy   | What was asked, sent, and refused   |
 
 "Per policy" means: decided with counsel, then implemented as a privileged
 out-of-band job. The application itself cannot delete these — see

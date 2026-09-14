@@ -12,3 +12,4 @@ export * from './pricing.js';
 export * from './compliance.js';
 export * from './lifecycle.js';
 export * from './analytics.js';
+export * from './ai.js';

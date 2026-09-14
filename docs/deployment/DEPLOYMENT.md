@@ -100,9 +100,39 @@ run with an unsafe default. It will not start in production with:
 - a plaintext (`http://`) public URL
 - key material under 32 bytes
 - a real payment provider with no webhook secret
+- the filesystem storage provider, or S3 storage with no bucket
+- the development AI stand-in
+- a real AI provider with no API key, or any enabled AI provider with no daily
+  budget
 
 `scripts/verify-production-guards.mjs` asserts these in CI, so a guard rail
 cannot be quietly removed.
+
+### AI
+
+AI assistance is optional. `AI_PROVIDER=disabled` is a fully supported
+production configuration and the console says so rather than showing a broken
+feature.
+
+| Variable                 | Notes                                            |
+| ------------------------ | ------------------------------------------------ |
+| `AI_PROVIDER`            | `disabled`, `development` or `anthropic`         |
+| `AI_API_KEY`             | Required for `anthropic`                         |
+| `AI_MODEL`               | Model identifier                                 |
+| `AI_TIMEOUT_MS`          | Per-request timeout                              |
+| `AI_DAILY_BUDGET_MICROS` | Must be non-zero when enabled                    |
+| `AI_RATE_LIMIT_PER_HOUR` | Per staff member                                 |
+| `AI_INPUT_PRICE_MICROS`  | Price per million input tokens, for cost records |
+| `AI_OUTPUT_PRICE_MICROS` | Price per million output tokens                  |
+
+`development` is the stand-in used to exercise the guardrails and the audit
+trail without an API key. It is refused in production for the same reason the
+mock payment provider is: output that is not from a model must never be mistaken
+for output that is.
+
+An enabled provider with `AI_DAILY_BUDGET_MICROS=0` is refused at boot. A
+feature that calls a metered API with no ceiling is an incident waiting for a
+retry loop, and the limit is cheaper to set than to discover.
 
 ## TLS
 
@@ -229,3 +259,5 @@ at a runbook section. An alert nobody can act on is noise.
 - [ ] Admin console restricted by IP or VPN
 - [ ] Cloudflare configured, origin not directly reachable
 - [ ] `verify-production-guards.mjs` passing in CI
+- [ ] AI either disabled, or configured with a real provider, a key and a daily
+      budget

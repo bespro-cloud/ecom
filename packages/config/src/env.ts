@@ -145,8 +145,35 @@ export const serverEnvSchema = z
     THREEPL_API_KEY: z.string().optional(),
     THREEPL_API_SECRET: z.string().optional(),
 
-    AI_PROVIDER: z.enum(['disabled', 'anthropic']).default('disabled'),
+    /**
+     * `disabled` is a legitimate production configuration and the default: a
+     * platform with no AI features is a perfectly good platform. `development`
+     * is the stand-in and is refused in production below.
+     */
+    AI_PROVIDER: z.enum(['disabled', 'development', 'anthropic']).default('disabled'),
     AI_API_KEY: z.string().optional(),
+    AI_MODEL: z.string().default('claude-sonnet-4-5'),
+    AI_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(120_000).default(30_000),
+    /**
+     * Per-million-token prices in hundredths of a cent, so cost accounting is
+     * integer arithmetic like every other money figure here.
+     *
+     * Configuration rather than a hard-coded table, because a stale price makes
+     * every cost report quietly wrong and nobody notices until the invoice.
+     */
+    AI_INPUT_PRICE_MICROS: z.coerce.number().int().min(0).default(300_000),
+    AI_OUTPUT_PRICE_MICROS: z.coerce.number().int().min(0).default(1_500_000),
+    /**
+     * The daily ceiling on AI spend, in hundredths of a cent. Zero means no
+     * budget, and no budget means no calls — an unset limit fails closed.
+     *
+     * An AI feature with no ceiling is an unbounded liability attached to a
+     * text box: a loop or a careless script can spend a great deal of somebody
+     * else's money before anyone notices.
+     */
+    AI_DAILY_BUDGET_MICROS: z.coerce.number().int().min(0).default(0),
+    /** Calls per staff member per hour. */
+    AI_RATE_LIMIT_PER_HOUR: z.coerce.number().int().min(0).max(10_000).default(60),
 
     SENTRY_DSN: z.string().optional(),
     SENTRY_TRACES_SAMPLE_RATE: z.coerce.number().min(0).max(1).default(0.1),
@@ -207,6 +234,29 @@ export const serverEnvSchema = z
         code: z.ZodIssueCode.custom,
         path: ['PAYMENT_WEBHOOK_SECRET'],
         message: 'required so payment webhook signatures can be verified',
+      });
+    }
+    if (env.AI_PROVIDER === 'development') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['AI_PROVIDER'],
+        message: 'the development AI stand-in must never run in production',
+      });
+    }
+    if (env.AI_PROVIDER === 'anthropic' && !env.AI_API_KEY) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['AI_API_KEY'],
+        message: 'required when AI_PROVIDER=anthropic',
+      });
+    }
+    // A configured provider with no budget cannot make a call, which is a
+    // confusing way to discover the setting exists. Say so at boot instead.
+    if (env.AI_PROVIDER !== 'disabled' && env.AI_DAILY_BUDGET_MICROS === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['AI_DAILY_BUDGET_MICROS'],
+        message: 'must be set above zero when an AI provider is enabled, or no call can be made',
       });
     }
     if (env.EMAIL_PROVIDER === 'console') {

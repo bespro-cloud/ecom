@@ -15,6 +15,7 @@
     "clean": "rm -rf dist .turbo"
   },
   "dependencies": {
+    "@health/ai": "workspace:*",
     "@health/auth": "workspace:*",
     "@health/config": "workspace:*",
     "@health/database": "workspace:*",

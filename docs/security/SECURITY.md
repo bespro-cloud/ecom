@@ -149,6 +149,13 @@ forgotten:
 
 Audit `before`/`after` snapshots pass through the same deep redactor.
 
+Prompts sent to a model provider are redacted by a separate pass before the
+request is built — emails, phone numbers, addresses, and customer and order
+references become placeholders — and the redacted text is the only copy stored.
+The provider is an external party, so this is an egress control rather than a
+logging one, and it happens at the gateway every call passes through rather than
+at each place a prompt is assembled.
+
 An inbound `X-Correlation-Id` is honoured only when it is a well-formed UUID, so
 a client cannot inject text into log lines.
 
@@ -209,8 +216,14 @@ Stated plainly, because an unlisted gap is worse than a listed one.
    by an independent party.
 4. **No load testing.** No throughput figure is claimed anywhere.
 5. **No automated browser E2E.** Flows were verified manually against running
-   services; Playwright lands in Phase 2.
-6. **Audit retention is manual.** The application cannot delete audit rows at
+   services; Playwright lands in Phase 8.
+6. **Model output is filtered, not proven safe.** The guardrails are pattern
+   matching over complete text, plus citation and grounding checks against what
+   was actually retrieved. They catch the failures they were written for; they
+   are not a proof that nothing unsafe gets through. What makes that survivable
+   is that no AI output reaches a customer and none of it changes anything —
+   a person accepts it first, and the provider interface has no tools.
+7. **Audit retention is manual.** The application cannot delete audit rows at
    all — by design. Retention is a privileged, out-of-band operation
    (see [../operations/RETENTION.md](../operations/RETENTION.md)).
 

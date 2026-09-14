@@ -47,6 +47,9 @@ packages/
   config/       Environment contract, clock, log redaction.
   auth/         Password hashing, tokens, TOTP, envelope encryption.
   notifications/ Email and SMS provider abstraction plus templates.
+  payments/     Payment provider abstraction and adapters.
+  storage/      Object storage abstraction and adapters.
+  ai/           Model provider abstraction. Deliberately has no tool surface.
   ui/           Shared accessible React primitives.
 
 prisma/         schema.prisma and migrations (single source of truth).
@@ -95,8 +98,8 @@ apps/api/src/
     health/          probes and metrics
 ```
 
-Later phases add `products/`, `inventory/`, `orders/`, `payments/`,
-`compliance/`, `claims/`, `evidence/`, `recalls/`, `ai/` in the same shape.
+Later phases added `catalogue/`, `commerce/`, `compliance/`, `lifecycle/`,
+`growth/` and `ai/` in the same shape.
 
 ## Decisions worth stating
 
@@ -150,6 +153,24 @@ session cannot quietly widen `SUPER_ADMIN`.
 Only `COMPLIANCE_REVIEWER` (and `SUPER_ADMIN`) can sign off a health claim, and
 only with MFA satisfied. An operational administrator being able to approve a
 medical claim would defeat the point of having a review process.
+
+### AI is a leaf, never a caller
+
+The model provider abstraction in `packages/ai` has no tools and no
+function-calling surface, and `AiGatewayService` is the only holder of a
+provider anywhere in the API. Everything that offers assistance holds the
+gateway, which returns text.
+
+The consequence is the property worth having: there is no code path by which a
+model's output becomes a call into this application. "AI cannot change anything"
+is then a fact about the wiring rather than a claim about prompts — and it
+survives a model that ignores every instruction it was given, which is the only
+threat model worth designing for.
+
+Downstream of that, what a model produces is a `AiSuggestion` row whose `kind`
+is one of five enumerated values, none of which can publish, approve, refund or
+moderate, with a CHECK constraint refusing anything else. A person accepts a
+suggestion; accepting writes to a draft. The sensitive act stays where it was.
 
 ## Scaling
 
