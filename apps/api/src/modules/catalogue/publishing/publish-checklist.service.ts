@@ -3,9 +3,11 @@ import type { Clock } from '@health/config';
 import {
   DSHEA_REQUIRED_TYPES,
   LABEL_REQUIRED_TYPES,
+  EVIDENCE_REQUIRED_CLAIM_TYPES,
   PUBLISH_CHECK_DEFINITIONS,
   SEO_DESCRIPTION_MAX,
   SEO_TITLE_MAX,
+  SUBSTANTIATING_RELEVANCE,
   summarisePublishReadiness,
   type ProductType,
   type PublishCheckDefinition,
@@ -47,7 +49,7 @@ import { WarehousesService } from '../../commerce/inventory/warehouses.service.j
  * so it is deliberately a single, visible line rather than a number repeated
  * through the file.
  */
-const IMPLEMENTED_THROUGH_PHASE = 3;
+const IMPLEMENTED_THROUGH_PHASE = 4;
 
 @Injectable()
 export class PublishChecklistService {
@@ -153,7 +155,11 @@ export class PublishChecklistService {
       const outcome =
         definition.key === 'INVENTORY_CONFIGURED'
           ? await this.checkInventory(productId)
-          : this.runCheck(definition, product, seo, type);
+          : definition.key === 'CLAIMS_REVIEWED'
+            ? await this.checkClaims(productId)
+            : definition.key === 'EVIDENCE_REVIEWED'
+              ? await this.checkEvidence(productId)
+              : this.runCheck(definition, product, seo, type);
 
       // An operator has excluded this check from the required set: report the
       // real finding, but do not block on it.
@@ -423,6 +429,141 @@ export class PublishChecklistService {
       };
     }
     return { state: 'PASS' };
+  }
+
+  /**
+   * Whether every recorded claim on this listing has been approved.
+   *
+   * **Be clear about what this does and does not verify.** It checks the claims
+   * someone recorded as claims. It does not read the product description and
+   * decide whether it contains an unrecorded claim — that inference about
+   * regulated speech is not one software should make, and a system that made it
+   * would fail in the direction nobody notices: the claim it missed is exactly
+   * the one that goes out unreviewed.
+   *
+   * So the honest division of labour is: this check guarantees no *recorded*
+   * claim reaches a customer unapproved, and the human compliance review is
+   * where someone attests that the copy makes no claims beyond those recorded.
+   * The detail text says so, rather than letting a green tick imply more.
+   */
+  private async checkClaims(
+    productId: string,
+  ): Promise<{ state: 'PASS' | 'FAIL'; detail?: string }> {
+    const claims = await this.prisma.productClaim.findMany({
+      where: { productId, status: { notIn: ['WITHDRAWN', 'REJECTED'] } },
+      select: {
+        id: true,
+        status: true,
+        type: true,
+        reviewDueAt: true,
+        approvedVersionId: true,
+        currentVersionId: true,
+      },
+    });
+
+    if (claims.length === 0) {
+      return {
+        state: 'PASS',
+        detail:
+          'No claims are recorded against this listing. The compliance reviewer confirms separately that the copy makes none.',
+      };
+    }
+
+    const unapproved = claims.filter((claim) => claim.status !== 'APPROVED');
+    if (unapproved.length > 0) {
+      const states = [
+        ...new Set(unapproved.map((claim) => claim.status.toLowerCase().replace(/_/g, ' '))),
+      ];
+      return {
+        state: 'FAIL',
+        detail: `${unapproved.length} of ${claims.length} claim(s) are not approved (${states.join(', ')}).`,
+      };
+    }
+
+    const now = this.clock.timestamp();
+    const lapsed = claims.filter(
+      (claim) => claim.reviewDueAt !== null && claim.reviewDueAt.getTime() <= now,
+    );
+    if (lapsed.length > 0) {
+      return {
+        state: 'FAIL',
+        detail: `${lapsed.length} claim approval(s) have lapsed and need re-reviewing.`,
+      };
+    }
+
+    // An approved claim whose wording has since been edited. The listing would
+    // still show the approved text, but publishing in that state means shipping
+    // a page the admin screen does not match.
+    const edited = claims.filter(
+      (claim) =>
+        claim.approvedVersionId !== null && claim.approvedVersionId !== claim.currentVersionId,
+    );
+    if (edited.length > 0) {
+      return {
+        state: 'FAIL',
+        detail: `${edited.length} claim(s) have been reworded since approval and need re-reviewing.`,
+      };
+    }
+
+    return {
+      state: 'PASS',
+      detail: `${claims.length} recorded claim(s), all approved. Claims not recorded here are not checked by this gate.`,
+    };
+  }
+
+  /**
+   * Whether each approved claim that needs substantiation has any.
+   *
+   * Counts accepted sources marked as direct or indirect support. There is no
+   * scoring and no threshold beyond "at least one", because weighing whether a
+   * study actually supports a sentence is the reviewer's judgement and the
+   * whole substance of their job — a confidence number here would look like the
+   * software had formed a view, and people would rely on it.
+   */
+  private async checkEvidence(
+    productId: string,
+  ): Promise<{ state: 'PASS' | 'FAIL'; detail?: string }> {
+    const claims = await this.prisma.productClaim.findMany({
+      where: { productId, status: 'APPROVED' },
+      select: {
+        id: true,
+        type: true,
+        evidenceLinks: {
+          select: { relevance: true, evidence: { select: { status: true } } },
+        },
+      },
+    });
+
+    const needing = claims.filter((claim) =>
+      EVIDENCE_REQUIRED_CLAIM_TYPES.includes(claim.type as never),
+    );
+    if (needing.length === 0) {
+      return {
+        state: 'PASS',
+        detail: 'No approved claim on this listing requires study evidence.',
+      };
+    }
+
+    const unsupported = needing.filter(
+      (claim) =>
+        claim.evidenceLinks.filter(
+          (link) =>
+            link.evidence.status === 'ACCEPTED' &&
+            SUBSTANTIATING_RELEVANCE.includes(link.relevance as never),
+        ).length === 0,
+    );
+
+    if (unsupported.length > 0) {
+      return {
+        state: 'FAIL',
+        detail: `${unsupported.length} approved claim(s) have no accepted supporting evidence.`,
+      };
+    }
+
+    return {
+      state: 'PASS',
+      detail: `${needing.length} claim(s) requiring substantiation each have accepted evidence.`,
+    };
   }
 
   private checkCompliance(product: ProductForChecklist) {

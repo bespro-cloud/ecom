@@ -6,3 +6,4 @@ export {
   expireStaleCheckouts,
   type MaintenanceDeps,
 } from './maintenance/commerce.js';
+export { expireLapsedClaims, expireLapsedLots } from './maintenance/compliance.js';

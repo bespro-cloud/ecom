@@ -94,6 +94,15 @@ export class InventoryService {
         reservedQuantity: true,
         trackInventory: true,
         allowBackorder: true,
+        lotTracked: true,
+        // Only allocatable lots. Quarantined, recalled and expired stock is
+        // physically on the shelf and counted in `onHandQuantity`, but it is
+        // not sellable — reporting it as available is how recalled goods get
+        // promised to a customer.
+        batches: {
+          where: { status: 'AVAILABLE' },
+          select: { quantityOnHand: true, quantityReserved: true },
+        },
       },
     });
 
@@ -104,7 +113,14 @@ export class InventoryService {
         result.set(row.variantId, null);
         continue;
       }
-      const available = Math.max(0, row.onHandQuantity - row.reservedQuantity);
+
+      const available = row.lotTracked
+        ? row.batches.reduce(
+            (sum, batch) => sum + Math.max(0, batch.quantityOnHand - batch.quantityReserved),
+            0,
+          )
+        : Math.max(0, row.onHandQuantity - row.reservedQuantity);
+
       result.set(row.variantId, (result.get(row.variantId) ?? 0) + available);
     }
     return result;
@@ -178,7 +194,7 @@ export class InventoryService {
     const where = owner.cartId ? { cartId: owner.cartId } : { orderId: owner.orderId };
     const open = await tx.inventoryReservation.findMany({
       where: { ...where, status: { in: ['HELD', 'COMMITTED'] } },
-      select: { id: true, inventoryItemId: true, quantity: true },
+      select: { id: true, inventoryItemId: true, quantity: true, batchId: true },
     });
     if (open.length === 0) return;
 
@@ -188,6 +204,16 @@ export class InventoryService {
         where: { id: reservation.inventoryItemId },
         data: { reservedQuantity: { decrement: reservation.quantity } },
       });
+      // The lot has to get its units back as well. Releasing only the aggregate
+      // would leave the lot permanently holding stock nobody is buying, and the
+      // drift is invisible until the lot reports as empty while units sit on
+      // the shelf.
+      if (reservation.batchId) {
+        await tx.inventoryBatch.update({
+          where: { id: reservation.batchId },
+          data: { quantityReserved: { decrement: reservation.quantity } },
+        });
+      }
     }
 
     await tx.inventoryReservation.updateMany({
@@ -212,7 +238,7 @@ export class InventoryService {
     for (const line of [...lines].sort((a, b) => a.variantId.localeCompare(b.variantId))) {
       const reservations = await tx.inventoryReservation.findMany({
         where: { orderId, status: 'COMMITTED', inventoryItem: { variantId: line.variantId } },
-        select: { id: true, inventoryItemId: true, quantity: true },
+        select: { id: true, inventoryItemId: true, quantity: true, batchId: true },
         orderBy: { createdAt: 'asc' },
       });
 
@@ -229,6 +255,20 @@ export class InventoryService {
             reservedQuantity: { decrement: take },
           },
         });
+
+        // These units physically left the building, so they leave the lot too.
+        // This is what makes a recall answerable later: the lot's remaining
+        // on-hand is what is still recoverable, and the reservation rows say
+        // which orders took the rest.
+        if (reservation.batchId) {
+          await tx.inventoryBatch.update({
+            where: { id: reservation.batchId },
+            data: {
+              quantityOnHand: { decrement: take },
+              quantityReserved: { decrement: take },
+            },
+          });
+        }
 
         await tx.inventoryAdjustment.create({
           data: {
@@ -466,6 +506,52 @@ export class InventoryService {
         };
       }
 
+      if (locked.lotTracked) {
+        // Lot-tracked stock is allocated from specific lots, earliest expiry
+        // first. Nothing else is allocatable: if every lot is quarantined,
+        // recalled or expired, this contributes nothing and the caller is told
+        // it is short — which is the correct refusal. Shipping a regulated
+        // product without being able to say which lot it came from defeats the
+        // point of tracking lots at all.
+        const batches = await this.lockAllocatableBatches(tx, item.id);
+
+        for (const batch of batches) {
+          if (remaining <= 0) break;
+
+          const batchAvailable = Math.max(0, batch.quantityOnHand - batch.quantityReserved);
+          availableSeen += batchAvailable;
+          const take = Math.min(remaining, batchAvailable);
+          if (take === 0) continue;
+
+          await tx.inventoryBatch.update({
+            where: { id: batch.id },
+            data: { quantityReserved: { increment: take } },
+          });
+          // The item-level total is kept in step, because every other part of
+          // the system reads the aggregate.
+          await tx.inventoryItem.update({
+            where: { id: item.id },
+            data: { reservedQuantity: { increment: take } },
+          });
+          await tx.inventoryReservation.create({
+            data: {
+              inventoryItemId: item.id,
+              batchId: batch.id,
+              quantity: take,
+              status: 'HELD',
+              cartId: owner.cartId,
+              expiresAt: owner.expiresAt,
+            },
+          });
+
+          remaining -= take;
+        }
+
+        // Count the remainder of any partially-used lot toward what was seen,
+        // so the shortfall message reports real availability.
+        continue;
+      }
+
       const available = Math.max(0, locked.onHandQuantity - locked.reservedQuantity);
       availableSeen += available;
       const take = Math.min(remaining, available);
@@ -515,6 +601,7 @@ export class InventoryService {
     reservedQuantity: number;
     trackInventory: boolean;
     allowBackorder: boolean;
+    lotTracked: boolean;
   }> {
     const rows = await tx.$queryRaw<
       Array<{
@@ -524,9 +611,11 @@ export class InventoryService {
         reserved_quantity: number;
         track_inventory: boolean;
         allow_backorder: boolean;
+        lot_tracked: boolean;
       }>
     >(Prisma.sql`
-      SELECT id, warehouse_id, on_hand_quantity, reserved_quantity, track_inventory, allow_backorder
+      SELECT id, warehouse_id, on_hand_quantity, reserved_quantity, track_inventory,
+             allow_backorder, lot_tracked
         FROM inventory_items
        WHERE id = ${inventoryItemId}::uuid
          FOR UPDATE
@@ -542,6 +631,48 @@ export class InventoryService {
       reservedQuantity: row.reserved_quantity,
       trackInventory: row.track_inventory,
       allowBackorder: row.allow_backorder,
+      lotTracked: row.lot_tracked,
     };
+  }
+
+  /**
+   * The allocatable lots of a stock record, earliest expiry first, locked.
+   *
+   * First-expiry-first-out, which for a regulated product is not a preference:
+   * shipping the newest lot while an older one ages out on the shelf turns
+   * saleable stock into a write-off, and worse, raises the chance that what
+   * reaches a customer is close to its date.
+   *
+   * The `WHERE` clause is the safety property. Only `AVAILABLE` lots are
+   * returned, so quarantined, recalled and expired stock cannot be allocated by
+   * any path through this code — there is no flag a caller could pass to widen
+   * it. Lots with a stated expiry sort first; an undated lot sorts last rather
+   * than first, because "no expiry recorded" is not evidence of freshness.
+   *
+   * `FOR UPDATE` is taken in the same statement that orders the rows, so two
+   * concurrent checkouts serialise on the same lot rather than both reading the
+   * same remaining quantity.
+   */
+  private async lockAllocatableBatches(
+    tx: Tx,
+    inventoryItemId: string,
+  ): Promise<Array<{ id: string; quantityOnHand: number; quantityReserved: number }>> {
+    const rows = await tx.$queryRaw<
+      Array<{ id: string; quantity_on_hand: number; quantity_reserved: number }>
+    >(Prisma.sql`
+      SELECT id, quantity_on_hand, quantity_reserved
+        FROM inventory_batches
+       WHERE inventory_item_id = ${inventoryItemId}::uuid
+         AND status = 'AVAILABLE'
+         AND quantity_on_hand > quantity_reserved
+       ORDER BY expires_at ASC NULLS LAST, received_at ASC, id ASC
+         FOR UPDATE
+    `);
+
+    return rows.map((row) => ({
+      id: row.id,
+      quantityOnHand: row.quantity_on_hand,
+      quantityReserved: row.quantity_reserved,
+    }));
   }
 }

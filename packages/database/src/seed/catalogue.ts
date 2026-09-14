@@ -196,6 +196,8 @@ interface ProductSeed {
   compareAtPriceCents?: number;
   costCents: number;
   weightGrams: number;
+  /** Label for the single default variant, e.g. "120 capsules". */
+  variantName: string;
   subscriptionEligible: boolean;
   categorySlugs: string[];
   primaryCategorySlug: string;
@@ -228,6 +230,7 @@ const PRODUCTS: ProductSeed[] = [
     compareAtPriceCents: 2900,
     costCents: 780,
     weightGrams: 140,
+    variantName: '120 capsules',
     subscriptionEligible: true,
     categorySlugs: ['minerals', 'supplements'],
     primaryCategorySlug: 'minerals',
@@ -264,6 +267,7 @@ const PRODUCTS: ProductSeed[] = [
     priceCents: 1600,
     costCents: 420,
     weightGrams: 90,
+    variantName: '90 capsules',
     subscriptionEligible: true,
     categorySlugs: ['vitamins', 'supplements'],
     primaryCategorySlug: 'vitamins',
@@ -299,6 +303,7 @@ const PRODUCTS: ProductSeed[] = [
     priceCents: 3200,
     costCents: 1150,
     weightGrams: 180,
+    variantName: '60 softgels',
     subscriptionEligible: true,
     categorySlugs: ['omega-3', 'supplements'],
     primaryCategorySlug: 'omega-3',
@@ -332,6 +337,7 @@ const PRODUCTS: ProductSeed[] = [
     priceCents: 1200,
     costCents: 310,
     weightGrams: 120,
+    variantName: '100 tablets',
     subscriptionEligible: true,
     categorySlugs: ['vitamins', 'supplements'],
     primaryCategorySlug: 'vitamins',
@@ -366,6 +372,7 @@ const PRODUCTS: ProductSeed[] = [
     priceCents: 900,
     costCents: 240,
     weightGrams: 95,
+    variantName: 'Single unit',
     subscriptionEligible: false,
     categorySlugs: ['accessories'],
     primaryCategorySlug: 'accessories',
@@ -558,6 +565,23 @@ export async function seedCatalogue(prisma: PrismaClient): Promise<void> {
         // Left as a draft on purpose. Publication runs through the checklist
         // and a compliance reviewer; seeding past that would defeat the gate.
         status: 'DRAFT',
+      },
+    });
+
+    // Every sellable product needs at least one variant: stock is held per
+    // variant, so a product without one cannot be stocked, allocated or bought.
+    // Phase 2 did not need this and did not have it, which quietly made the
+    // Phase 3 stock seed a no-op on a fresh database — there was nothing to
+    // stock. A single default variant is the honest minimum.
+    await prisma.productVariant.upsert({
+      where: { sku: `${definition.sku}-V1` },
+      update: { name: definition.variantName, isActive: true },
+      create: {
+        productId: product.id,
+        sku: `${definition.sku}-V1`,
+        name: definition.variantName,
+        position: 0,
+        isActive: true,
       },
     });
 

@@ -374,7 +374,7 @@ describe('the publishing gate', () => {
     expect(response.status).toBe(422);
   });
 
-  it('reports later-phase checks as not-yet-enforced rather than as passes', async () => {
+  it('evaluates every declared check, with none left unenforced', async () => {
     const staff = await signedInStaff(harness, 'PRODUCT_MANAGER');
     const product = await createDraftProduct(staff);
 
@@ -383,9 +383,19 @@ describe('the publishing gate', () => {
       .get(`/api/v1/admin/catalogue/products/${product.id}/readiness`)
       .set(auth(staff));
 
-    // Inventory became enforceable in Phase 3; claims and evidence arrive in
-    // Phase 4.
-    expect(readiness.body.notYetEnforced.sort()).toEqual(['CLAIMS_REVIEWED', 'EVIDENCE_REVIEWED']);
+    // Inventory became enforceable in Phase 3, claims and evidence in Phase 4.
+    // Every declared check now has a real evaluation behind it.
+    expect(readiness.body.notYetEnforced).toEqual([]);
+
+    // The property this replaces still holds and still matters: a check is
+    // never silently absent. Every declared key is reported with a state.
+    const reported = readiness.body.checks.map((check: { key: string }) => check.key).sort();
+    expect(reported).toContain('CLAIMS_REVIEWED');
+    expect(reported).toContain('EVIDENCE_REVIEWED');
+    expect(reported).toContain('INVENTORY_CONFIGURED');
+    for (const check of readiness.body.checks) {
+      expect(['PASS', 'FAIL', 'NOT_APPLICABLE', 'NOT_YET_ENFORCED']).toContain(check.state);
+    }
   });
 
   it('publishes once a compliance reviewer has approved it', async () => {

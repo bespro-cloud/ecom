@@ -17,7 +17,21 @@ export interface TestHarness {
 }
 
 const TRUNCATABLE = [
-  // Commerce first: these reference the catalogue rows below them.
+  // Compliance first: recall lots reference batches, and claim rows reference
+  // the products further down.
+  'recall_actions',
+  'recall_lots',
+  'recalls',
+  'batch_events',
+  'inventory_batches',
+  'product_documents',
+  'claim_evidence',
+  'evidence_records',
+  'claim_reviews',
+  'product_claim_versions',
+  'product_claims',
+
+  // Commerce next: these reference the catalogue rows below them.
   'shipment_items',
   'shipments',
   'refunds',
@@ -73,6 +87,11 @@ const APPEND_ONLY = [
   'compliance_reviews',
   'order_events',
   'inventory_adjustments',
+  'product_claim_versions',
+  'claim_reviews',
+  'batch_events',
+  'recall_actions',
+  'recall_lots',
 ];
 
 export async function createHarness(): Promise<TestHarness> {
@@ -87,8 +106,8 @@ export async function createHarness(): Promise<TestHarness> {
   await seedBaselineSettings(prisma);
 
   const reset = async (): Promise<void> => {
-    // These three are append-only, enforced by a trigger. Tests are the one
-    // place that is allowed to clear them, and only by disabling the trigger
+    // These are append-only, enforced by a trigger. Tests are the one place
+    // that is allowed to clear them, and only by disabling the trigger
     // explicitly — which is exactly the noise we want if it ever appears
     // outside this file.
     for (const table of APPEND_ONLY) {

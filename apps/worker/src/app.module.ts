@@ -10,6 +10,7 @@ import { OutboxDispatcherService } from './outbox/outbox-dispatcher.service.js';
 import { EmailProcessor } from './processors/email.processor.js';
 import { MaintenanceService } from './processors/maintenance.service.js';
 import { CommerceMaintenanceService } from './processors/commerce-maintenance.service.js';
+import { ComplianceMaintenanceService } from './processors/compliance-maintenance.service.js';
 import { WorkerHealthController } from './health/health.controller.js';
 
 @Module({
@@ -42,6 +43,7 @@ import { WorkerHealthController } from './health/health.controller.js';
     EmailProcessor,
     MaintenanceService,
     CommerceMaintenanceService,
+    ComplianceMaintenanceService,
   ],
 })
 export class WorkerModule {}

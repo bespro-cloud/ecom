@@ -17,6 +17,12 @@ import { SEED_MARKER } from './catalogue.js';
  *    records. Inventing them would put fabricated money in the books and in
  *    every report reading from them, and there is no version of that which is
  *    useful.
+ *  - **It creates no claims, evidence or documents.** Those are regulatory
+ *    records. A seeded health claim would be a claim nobody reviewed, seeded
+ *    evidence would be a study nobody read, and a seeded certificate would
+ *    assert a certification that does not exist. Stock and lots are operational
+ *    facts and are safe to fabricate for a development database; substantiation
+ *    is not.
  *  - **It sets stock through the adjustment ledger**, with a stated reason,
  *    exactly as a warehouse operator would. Writing `onHandQuantity` directly
  *    would produce stock with no provenance — the one thing the ledger exists
@@ -123,30 +129,75 @@ export async function seedCommerce(prisma: PrismaClient): Promise<void> {
       },
     });
 
-    // Top up to the seed level through the ledger, so the stock has the same
-    // provenance any other stock would. Re-running the seed adds nothing once
-    // the level is already there, and never removes units an operator added.
-    const delta = SEED_ON_HAND - item.onHandQuantity;
-    if (delta <= 0) continue;
+    // Stock arrives as lots, through the ledger, so it has the same provenance
+    // any real receipt would. Re-running the seed adds nothing once the lots
+    // exist, and never removes units an operator added.
+    // Lot tracking first, and independent of the quantity top-up. A re-run
+    // whose stock is already at the seed level still needs its lots, and
+    // nesting the two meant the second run silently produced none.
+    await prisma.inventoryItem.update({ where: { id: item.id }, data: { lotTracked: true } });
 
-    await prisma.$transaction(async (tx) => {
-      const updated = await tx.inventoryItem.update({
-        where: { id: item.id },
-        data: { onHandQuantity: { increment: delta } },
-      });
+    // Two lots with different dates, because one lot cannot demonstrate
+    // first-expiry-first-out doing anything.
+    const lots = [
+      { code: 'DEV-LOT-A', quantity: Math.ceil(SEED_ON_HAND / 2), months: 6 },
+      { code: 'DEV-LOT-B', quantity: Math.floor(SEED_ON_HAND / 2), months: 18 },
+    ];
 
-      await tx.inventoryAdjustment.create({
-        data: {
-          inventoryItemId: item.id,
-          warehouseId: warehouse.id,
-          quantityDelta: delta,
-          resultingOnHand: updated.onHandQuantity,
-          reason: 'RECEIPT',
-          reference: 'DEV-SEED',
-          notes: `${SEED_MARKER} Opening stock for local development.`,
-          actorLabel: `${SEED_MARKER} seed`,
-        },
+    for (const lot of lots) {
+      const existing = await prisma.inventoryBatch.findUnique({
+        where: { inventoryItemId_lotCode: { inventoryItemId: item.id, lotCode: lot.code } },
+        select: { id: true },
       });
-    });
+      if (existing) continue;
+
+      const expiresAt = new Date();
+      expiresAt.setMonth(expiresAt.getMonth() + lot.months);
+
+      await prisma.$transaction(async (tx) => {
+        const batch = await tx.inventoryBatch.create({
+          data: {
+            inventoryItemId: item.id,
+            lotCode: lot.code,
+            status: 'AVAILABLE',
+            quantityOnHand: lot.quantity,
+            expiresAt,
+            supplier: `${SEED_MARKER} Development supplier`,
+            notes: `${SEED_MARKER} Opening lot for local development.`,
+          },
+        });
+
+        await tx.batchEvent.create({
+          data: {
+            batchId: batch.id,
+            type: 'RECEIVED',
+            toStatus: 'AVAILABLE',
+            quantityDelta: lot.quantity,
+            reason: `${SEED_MARKER} Opening lot for local development.`,
+            actorLabel: `${SEED_MARKER} seed`,
+          },
+        });
+
+        const updated = await tx.inventoryItem.update({
+          where: { id: item.id },
+          data: { onHandQuantity: { increment: lot.quantity } },
+        });
+
+        // Through the ledger, like every other movement, so the stock has the
+        // same provenance any real receipt would.
+        await tx.inventoryAdjustment.create({
+          data: {
+            inventoryItemId: item.id,
+            warehouseId: warehouse.id,
+            quantityDelta: lot.quantity,
+            resultingOnHand: updated.onHandQuantity,
+            reason: 'RECEIPT',
+            reference: lot.code,
+            notes: `${SEED_MARKER} Opening stock for local development.`,
+            actorLabel: `${SEED_MARKER} seed`,
+          },
+        });
+      });
+    }
   }
 }

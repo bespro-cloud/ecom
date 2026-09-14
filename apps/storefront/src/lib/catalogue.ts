@@ -110,6 +110,14 @@ export interface ProductDetail {
     source: string | null;
   }>;
   allergens: string[];
+  /**
+   * Approved claims only, in the wording that was approved.
+   *
+   * The API filters on status and reads the approved version rather than the
+   * current one, so there is no state in which a draft, rejected or lapsed
+   * claim can reach this array.
+   */
+  claims: Array<{ type: string; text: string }>;
   disclaimers: Array<{ kind: string; text: string }>;
   seo: {
     title: string;

@@ -452,6 +452,179 @@ fixed order sorted by variant id. The lock prevents two checkouts reading the
 same availability and both succeeding; the fixed order prevents them deadlocking
 against each other.
 
+## Claims and evidence
+
+Under `/admin/compliance`. The permission split is the substance of the
+separation of duty:
+
+| Endpoint                                    | Permission                     |
+| ------------------------------------------- | ------------------------------ |
+| `GET /claims`, `GET /claims/:id`            | `CLAIM_READ`                   |
+| `POST /products/:id/claims`                 | `CLAIM_WRITE`                  |
+| `POST /claims/:id/versions`                 | `CLAIM_WRITE`                  |
+| `POST /claims/:id/submit`                   | `CLAIM_WRITE`                  |
+| `POST /claims/:id/decision`                 | `CLAIM_APPROVE` **and MFA**    |
+| `POST /claims/:id/withdraw`                 | `CLAIM_WRITE`                  |
+| `GET/POST /evidence`, `PATCH /evidence/:id` | `EVIDENCE_READ/WRITE`          |
+| `POST /evidence/:id/decision`               | `EVIDENCE_APPROVE` **and MFA** |
+| `POST /claims/:id/evidence`                 | `EVIDENCE_WRITE`               |
+| `DELETE /claims/:id/evidence/:evidenceId`   | `EVIDENCE_WRITE`               |
+| `GET/POST /documents`                       | `DOCUMENT_READ/WRITE`          |
+
+`CLAIM_APPROVE` is held by compliance reviewers and by nobody else — not
+`ADMIN`, not `PRODUCT_MANAGER`. The person who writes a health claim is
+deliberately not the person who signs it off.
+
+### What a claim is, and what the gate checks
+
+A claim is a record someone wrote. **Nothing reads marketing copy and infers
+one.** That inference about regulated speech is not one software should make,
+and it would fail in the direction nobody notices — the claim it missed is the
+one that goes out unreviewed.
+
+So the division of labour is explicit: `CLAIMS_REVIEWED` guarantees that no
+_recorded_ claim reaches a customer unapproved, and the human compliance review
+is where someone attests the copy makes no claims beyond those recorded. The
+check's `detail` says so in those words rather than letting a `PASS` imply more.
+
+### Versioning
+
+`POST /claims/:id/versions` writes a new version and takes the claim back out of
+approval. **It never touches the approved version.** Until the new wording is
+itself approved, the public listing keeps showing the text that was signed off —
+the API reads `approvedVersion`, not `currentVersion`, so there is no state in
+which an unreviewed edit appears on a live page.
+
+`POST /claims/:id/decision` names the `versionId` it applies to and is refused
+with `409` if the wording moved underneath. An approval that silently attached to
+a later edit would be a signature on text the signatory never saw.
+
+Version rows and decision rows are append-only at the database level.
+
+### Substantiation
+
+A structure/function, nutrient-content or health claim cannot be submitted or
+approved without at least one **accepted** source linked as `DIRECT` or
+`INDIRECT`. `CONTRADICTORY` is a relevance a reviewer can record on purpose — a
+substantiation file containing only supportive studies is a sales document — but
+it cannot be what an approval rests on.
+
+A `DISEASE` claim is refused on category alone, however much evidence is
+attached. No amount of substantiation makes one lawful on a supplement listing.
+
+There is no score, no weighting and no threshold beyond "at least one". Weighing
+whether a study supports a sentence is the reviewer's judgement and the whole
+substance of their job; a confidence figure would look like the software had
+formed a view.
+
+`limitations` is required on every source, with a real minimum length in Zod and
+again as a database `CHECK`. Evidence recorded without stated limitations is
+evidence being oversold, and it is the field that gets left blank first.
+
+Reviewed evidence cannot be edited (`409`): approvals rest on what it said. A
+correction is a new record, which forces the claim to be re-reviewed against it.
+
+### Documents
+
+Every document is returned with `issuerAsStated` rather than `issuer`, and a
+`verification: "NOT_VERIFIED_BY_THIS_SYSTEM"` field. The system records that a
+person uploaded a file and said what it is. It does not verify an issuer, check a
+certificate against a registry, or in any way evidence that a certification is
+valid. A document past its stated expiry is reported as `expired: true` rather
+than quietly ignored.
+
+## Lots and recalls
+
+Under `/admin/traceability`.
+
+| Endpoint                                 | Permission                  |
+| ---------------------------------------- | --------------------------- |
+| `GET /batches`, `GET /batches/:id`       | `BATCH_READ`                |
+| `POST /batches`                          | `BATCH_WRITE`               |
+| `POST /batches/:id/disposition`          | `BATCH_QUARANTINE`          |
+| `POST /lot-tracking`                     | `BATCH_WRITE`               |
+| `GET /recalls`, `GET /recalls/:id`       | `RECALL_READ`               |
+| `GET /recalls/:id/impact`                | `RECALL_READ`               |
+| `POST /recalls`, `.../lots`, `.../notes` | `RECALL_MANAGE`             |
+| `POST /recalls/:id/open`                 | `RECALL_MANAGE` **and MFA** |
+| `POST /recalls/:id/approve-notification` | `RECALL_NOTIFY` **and MFA** |
+| `POST /recalls/:id/close`                | `RECALL_MANAGE`             |
+| `POST /recalls/:id/cancel`               | `RECALL_MANAGE` **and MFA** |
+
+### First-expiry-first-out
+
+When a stock record is lot-tracked, allocation draws from lots ordered by
+`expires_at ASC NULLS LAST, received_at ASC`, under `FOR UPDATE` taken in the
+same statement that orders them. Only `AVAILABLE` lots are selected, and the
+filter is in the SQL rather than in a caller-supplied parameter: there is no
+argument that widens it to quarantined, recalled or expired stock.
+
+An undated lot sorts **last**, not first. "No expiry recorded" is not evidence of
+freshness.
+
+If no allocatable lot covers the order, allocation **refuses**. That is the
+correct refusal: shipping a regulated product without being able to say which lot
+it came from defeats the point of tracking lots. `availability` reports only
+allocatable units, so 50 units on the shelf with 40 quarantined reports as 10.
+
+### Disposition
+
+`POST /batches/:id/disposition` requires a written reason in both directions and
+writes it to an append-only ledger. Releasing is the more dangerous of the two to
+have no record of: "why was this held?" usually has a paper trail elsewhere,
+while "on what basis did we decide it was fine?" often does not.
+
+Recalled and expired stock can never return to sale. Correcting a mistaken recall
+means receiving the goods again as a new lot, with the receipt recorded.
+
+Units already reserved against open orders are left alone by a disposition
+change. Cancelling someone's paid order is a decision for a person with the order
+in front of them, not a side effect of a warehouse action.
+
+### Recalls, and the one rule that matters
+
+**This system never contacts anyone.**
+
+Opening a recall withdraws every lot in scope from sale immediately and
+automatically. That asymmetry is deliberate: stock that may be unsafe should stop
+being sold the moment somebody with the authority says so, and requiring a second
+approval to _stop selling_ would get the risk exactly the wrong way round.
+
+`GET /recalls/:id/impact` derives which orders received units from the recalled
+lots. What it returns depends on whether contact has been approved:
+
+- **Before approval** — counts only. Orders, distinct customers, units, broken
+  down by product. Enough to assess scale and brief a regulator; `orders` is
+  `null`.
+- **After approval** — the same counts plus the affected orders and the contact
+  details needed to reach them.
+
+The withholding happens in the service, not in a controller or a template, so
+there is no route, screen or export that reaches the identities by asking
+differently. Reading the impact is itself recorded on the recall, disclosed or
+not.
+
+`POST /recalls/:id/approve-notification` is the decision with legal consequences
+for people outside the business, and the route says so: its own permission
+(`RECALL_NOTIFY`, separate from `RECALL_MANAGE`), a second factor, a written
+basis, and an `acknowledgement` field that must be typed verbatim rather than
+ticked — because a checkbox is exactly how someone arrives here by clicking
+through screens.
+
+Approving still **sends nothing**. It unlocks the list and records who unlocked
+it and why. There is no transactional email in this platform; when there is,
+dispatch must remain a further explicit act.
+
+The database enforces the important half independently: a recall cannot sit in
+`NOTIFICATION_APPROVED` without a named approver and a timestamp, and every
+action on a recall is append-only.
+
+Cancelling restores each lot to the status it held **before** the recall, not to
+`AVAILABLE` — a lot already quarantined for an unrelated reason must not become
+sellable because a different recall was withdrawn. Cancelling is unavailable once
+contact has been approved; at that point the recall is a matter of record and is
+closed rather than undone.
+
 ## Media
 
 | Endpoint             | Permission      |

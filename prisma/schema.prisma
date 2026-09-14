@@ -542,6 +542,8 @@ model Media {
 
   productImages ProductImage[]
   seoImages     SeoMetadata[]
+  evidence      EvidenceRecord[]
+  documents     ProductDocument[]
 
   @@index([checksum])
   @@index([kind, createdAt])
@@ -657,6 +659,8 @@ model Product {
   disclaimers       ProductDisclaimer[]
   complianceReviews ComplianceReview[]
   orderItems        OrderItem[]
+  claims            ProductClaim[]
+  documents         ProductDocument[]
 
   @@index([status, publishedAt])
   @@index([type, status])
@@ -1200,6 +1204,15 @@ model InventoryItem {
   trackInventory Boolean @default(true) @map("track_inventory")
   allowBackorder Boolean @default(false) @map("allow_backorder")
 
+  /// Whether this stock must be allocated from a specific lot.
+  ///
+  /// When true, allocation draws from batches first-expiry-first-out and
+  /// **refuses** if no allocatable lot covers the order — which is the correct
+  /// refusal: shipping a regulated product you cannot identify the lot of
+  /// defeats the point of lot tracking. Default false so existing stock keeps
+  /// behaving as it did; turning it on is a deliberate act per stock record.
+  lotTracked Boolean @default(false) @map("lot_tracked")
+
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
@@ -1207,6 +1220,7 @@ model InventoryItem {
   warehouse    Warehouse              @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
   reservations InventoryReservation[]
   adjustments  InventoryAdjustment[]
+  batches      InventoryBatch[]
 
   @@unique([variantId, warehouseId])
   @@index([warehouseId])
@@ -1242,19 +1256,26 @@ model InventoryReservation {
   cartId  String? @map("cart_id") @db.Uuid
   orderId String? @map("order_id") @db.Uuid
 
+  /// Which lot the units were drawn from, when the item is lot-tracked. This
+  /// is what makes a recall answerable: given a lot, the orders that received
+  /// it are a single join away.
+  batchId String? @map("batch_id") @db.Uuid
+
   expiresAt  DateTime? @map("expires_at") @db.Timestamptz(6)
   releasedAt DateTime? @map("released_at") @db.Timestamptz(6)
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  inventoryItem InventoryItem @relation(fields: [inventoryItemId], references: [id], onDelete: Cascade)
-  cart          Cart?         @relation(fields: [cartId], references: [id], onDelete: SetNull)
-  order         Order?        @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  inventoryItem InventoryItem   @relation(fields: [inventoryItemId], references: [id], onDelete: Cascade)
+  cart          Cart?           @relation(fields: [cartId], references: [id], onDelete: SetNull)
+  order         Order?          @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  batch         InventoryBatch? @relation(fields: [batchId], references: [id], onDelete: Restrict)
 
   @@index([inventoryItemId, status])
   @@index([cartId])
   @@index([orderId])
+  @@index([batchId])
   @@index([status, expiresAt])
   @@map("inventory_reservations")
 }
@@ -1794,4 +1815,519 @@ model ShippingRate {
 
   @@index([isActive, position])
   @@map("shipping_rates")
+}
+
+// ---------------------------------------------------------------------------
+// Phase 4 — Compliance: claims, evidence, documents, lots and recalls
+// ---------------------------------------------------------------------------
+
+enum ClaimType {
+  STRUCTURE_FUNCTION
+  NUTRIENT_CONTENT
+  HEALTH_CLAIM
+  DISEASE
+  GENERAL
+}
+
+enum ClaimStatus {
+  DRAFT
+  EVIDENCE_REQUIRED
+  UNDER_REVIEW
+  APPROVED
+  REJECTED
+  EXPIRED
+  WITHDRAWN
+}
+
+/// A specific statement made about a product.
+///
+/// The claim record is the *identity* of a statement across its edits — "the
+/// sleep claim on this product" — while `ProductClaimVersion` holds the words.
+/// Splitting them is what makes "approved history is never overwritten"
+/// expressible: the pointer moves to a new version, and the version that was
+/// approved stays byte-for-byte as the reviewer signed it.
+///
+/// Nothing here is derived from marketing copy. A claim exists because a person
+/// wrote it down as one.
+model ProductClaim {
+  id        String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  productId String @map("product_id") @db.Uuid
+
+  type   ClaimType
+  status ClaimStatus @default(DRAFT)
+
+  /// The version currently being worked on or reviewed.
+  currentVersionId  String? @unique @map("current_version_id") @db.Uuid
+  /// The version that was approved, if any. Never repointed by an edit — only
+  /// by a new approval — so a listing always shows text a reviewer signed.
+  approvedVersionId String? @unique @map("approved_version_id") @db.Uuid
+
+  /// Where the claim appears. Display order on the listing.
+  position Int @default(0)
+
+  approvedAt  DateTime? @map("approved_at") @db.Timestamptz(6)
+  /// When the approval lapses and the claim stops being publishable.
+  reviewDueAt DateTime? @map("review_due_at") @db.Timestamptz(6)
+  withdrawnAt DateTime? @map("withdrawn_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  product         Product               @relation(fields: [productId], references: [id], onDelete: Cascade)
+  currentVersion  ProductClaimVersion?  @relation("CurrentVersion", fields: [currentVersionId], references: [id], onDelete: SetNull)
+  approvedVersion ProductClaimVersion?  @relation("ApprovedVersion", fields: [approvedVersionId], references: [id], onDelete: SetNull)
+  versions        ProductClaimVersion[] @relation("ClaimVersions")
+  reviews         ClaimReview[]
+  evidenceLinks   ClaimEvidence[]
+
+  @@index([productId, status])
+  @@index([status, reviewDueAt])
+  @@map("product_claims")
+}
+
+/// One version of a claim's wording.
+///
+/// Append-only. A database trigger rejects UPDATE and DELETE, so the text a
+/// reviewer approved cannot be altered after the fact by the application, by a
+/// migration, or by anyone with a database session short of dropping the
+/// trigger. That is the whole point: substantiation is a statement about
+/// specific words.
+model ProductClaimVersion {
+  id      String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  claimId String @map("claim_id") @db.Uuid
+
+  /// Monotonic per claim, starting at 1.
+  version Int
+
+  /// The exact words that would appear on the listing.
+  text         String
+  /// Where on the listing this is used, for the reviewer's context.
+  context      String?
+  /// Why this version differs from the last. Required from version 2 onward.
+  changeReason String? @map("change_reason")
+
+  authorId    String? @map("author_id") @db.Uuid
+  authorLabel String  @map("author_label")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  claim      ProductClaim  @relation("ClaimVersions", fields: [claimId], references: [id], onDelete: Cascade)
+  currentOf  ProductClaim? @relation("CurrentVersion")
+  approvedOf ProductClaim? @relation("ApprovedVersion")
+  reviews    ClaimReview[]
+
+  @@unique([claimId, version])
+  @@index([claimId, createdAt])
+  @@map("product_claim_versions")
+}
+
+enum ClaimDecision {
+  APPROVED
+  REJECTED
+  CHANGES_REQUESTED
+}
+
+/// A named person's decision on a specific version of a claim.
+///
+/// Append-only. Records the evidence that was linked at the moment of the
+/// decision, so "what was this approved on?" is answerable even after the
+/// evidence file grows.
+model ClaimReview {
+  id        String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  claimId   String @map("claim_id") @db.Uuid
+  versionId String @map("version_id") @db.Uuid
+
+  decision ClaimDecision
+  /// Required. A decision without reasoning is not a review.
+  notes    String
+
+  reviewerId    String    @map("reviewer_id") @db.Uuid
+  reviewerLabel String    @map("reviewer_label")
+  decidedAt     DateTime  @default(now()) @map("decided_at") @db.Timestamptz(6)
+  reviewDueAt   DateTime? @map("review_due_at") @db.Timestamptz(6)
+
+  /// The evidence ids and titles the reviewer had in front of them.
+  evidenceSnapshot Json? @map("evidence_snapshot")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  claim   ProductClaim        @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  version ProductClaimVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+
+  @@index([claimId, decidedAt])
+  @@index([decision, decidedAt])
+  @@map("claim_reviews")
+}
+
+enum EvidenceSourceType {
+  SYSTEMATIC_REVIEW
+  META_ANALYSIS
+  RANDOMISED_CONTROLLED_TRIAL
+  OBSERVATIONAL_STUDY
+  IN_VITRO
+  ANIMAL_STUDY
+  MANUFACTURER_DATA
+  REGULATORY_GUIDANCE
+  MONOGRAPH
+  OTHER
+}
+
+enum EvidenceStatus {
+  DRAFT
+  UNDER_REVIEW
+  ACCEPTED
+  REJECTED
+}
+
+/// A source a reviewer read, recorded in the reviewer's own words.
+///
+/// Every descriptive field is entered by a person. Nothing is fetched,
+/// summarised or inferred — a system that generated `outcome` from a title
+/// would be manufacturing the finding a claim rests on.
+///
+/// Evidence is a shared library rather than a child of one claim: a single
+/// trial commonly supports several claims across several products, and copying
+/// it per claim would mean a correction has to be made in several places, which
+/// is how substantiation files go stale.
+model EvidenceRecord {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  sourceType EvidenceSourceType @map("source_type")
+  status     EvidenceStatus     @default(DRAFT)
+
+  /// Short human title, for lists.
+  title         String
+  /// Full citation as published. Not parsed, not validated against anything.
+  citation      String
+  /// DOI, PubMed id or URL. Recorded for lookup; never fetched by the system.
+  identifier    String?
+  publishedYear Int?    @map("published_year")
+
+  /// Who was studied — species, sample size, characteristics.
+  population  String
+  /// The amount and form studied, as the source states it.
+  dosage      String
+  /// How long the study ran.
+  duration    String
+  /// What the source found.
+  outcome     String
+  /// What the source cannot support. Required, and not allowed to be empty:
+  /// evidence recorded without limitations is evidence being oversold.
+  limitations String
+
+  /// Optional uploaded copy of the source.
+  mediaId String? @map("media_id") @db.Uuid
+
+  addedById    String? @map("added_by_id") @db.Uuid
+  addedByLabel String  @map("added_by_label")
+
+  reviewedById    String?   @map("reviewed_by_id") @db.Uuid
+  reviewedByLabel String?   @map("reviewed_by_label")
+  reviewedAt      DateTime? @map("reviewed_at") @db.Timestamptz(6)
+  /// Why the evidence was accepted or rejected.
+  reviewNotes     String?   @map("review_notes")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  media Media?          @relation(fields: [mediaId], references: [id], onDelete: SetNull)
+  links ClaimEvidence[]
+
+  @@index([status, createdAt])
+  @@index([sourceType])
+  @@map("evidence_records")
+}
+
+enum EvidenceRelevance {
+  DIRECT
+  INDIRECT
+  BACKGROUND
+  CONTRADICTORY
+}
+
+/// A reviewer's judgement that a particular source bears on a particular claim.
+///
+/// The relevance lives on the link rather than on the evidence, because the
+/// same trial can be direct support for one claim and merely background for
+/// another. `CONTRADICTORY` is a value a reviewer can record on purpose: a
+/// substantiation file containing only supportive studies is a sales document,
+/// not a review.
+model ClaimEvidence {
+  id         String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  claimId    String @map("claim_id") @db.Uuid
+  evidenceId String @map("evidence_id") @db.Uuid
+
+  relevance EvidenceRelevance
+  /// The reviewer's note on how this source bears on this claim.
+  notes     String?
+
+  linkedById    String? @map("linked_by_id") @db.Uuid
+  linkedByLabel String  @map("linked_by_label")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  claim    ProductClaim   @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  evidence EvidenceRecord @relation(fields: [evidenceId], references: [id], onDelete: Restrict)
+
+  @@unique([claimId, evidenceId])
+  @@index([evidenceId])
+  @@map("claim_evidence")
+}
+
+enum DocumentType {
+  CERTIFICATE_OF_ANALYSIS
+  GMP_CERTIFICATE
+  THIRD_PARTY_TEST_REPORT
+  ALLERGEN_STATEMENT
+  SAFETY_DATA_SHEET
+  SUPPLIER_QUALIFICATION
+  HEAVY_METALS_REPORT
+  MICROBIOLOGY_REPORT
+  STABILITY_STUDY
+  LABEL_ARTWORK
+  REGULATORY_CORRESPONDENCE
+  OTHER
+}
+
+/// A regulatory or quality document held against a product or a lot.
+///
+/// The system records what a person said this file is. It does not verify the
+/// issuer, does not check the certificate is genuine, and must never be
+/// presented as evidence that a certification is valid — only that a document
+/// asserting one was uploaded, by whom, and when.
+///
+/// Superseding is a link rather than an edit, so the document that was current
+/// at the time of a shipment is still identifiable afterwards.
+model ProductDocument {
+  id        String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  productId String? @map("product_id") @db.Uuid
+  batchId   String? @map("batch_id") @db.Uuid
+
+  type      DocumentType
+  title     String
+  /// Who issued it, as stated on the document. Never inferred.
+  issuer    String?
+  /// The document's own reference number, if it has one.
+  reference String?
+
+  issuedAt  DateTime? @map("issued_at") @db.Timestamptz(6)
+  expiresAt DateTime? @map("expires_at") @db.Timestamptz(6)
+
+  mediaId String @map("media_id") @db.Uuid
+
+  notes String?
+
+  /// The document this one replaces. Append-only in effect: the superseded
+  /// document is kept and simply stops being current.
+  supersedesId String? @unique @map("supersedes_id") @db.Uuid
+
+  uploadedById    String? @map("uploaded_by_id") @db.Uuid
+  uploadedByLabel String  @map("uploaded_by_label")
+
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  archivedAt DateTime? @map("archived_at") @db.Timestamptz(6)
+
+  product      Product?         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  batch        InventoryBatch?  @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  media        Media            @relation(fields: [mediaId], references: [id], onDelete: Restrict)
+  supersedes   ProductDocument? @relation("DocumentSupersession", fields: [supersedesId], references: [id], onDelete: SetNull)
+  supersededBy ProductDocument? @relation("DocumentSupersession")
+
+  @@index([productId, type])
+  @@index([batchId, type])
+  @@index([expiresAt])
+  @@map("product_documents")
+}
+
+enum BatchStatus {
+  AVAILABLE
+  QUARANTINED
+  RECALLED
+  EXPIRED
+  DISPOSED
+}
+
+/// A lot of stock, received as a unit and traceable as one.
+///
+/// Quantities live here as well as on the inventory item. The item total stays
+/// the aggregate every other part of the system reads; the batch rows are what
+/// make allocation first-expiry-first-out and what a recall is scoped to. They
+/// are kept equal inside the same transaction, and a CHECK constraint refuses
+/// negative or over-reserved quantities on either.
+model InventoryBatch {
+  id              String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  inventoryItemId String @map("inventory_item_id") @db.Uuid
+
+  /// The manufacturer's lot code, as printed on the goods.
+  lotCode String @map("lot_code")
+
+  status BatchStatus @default(AVAILABLE)
+
+  manufacturedAt DateTime? @map("manufactured_at") @db.Timestamptz(6)
+  /// Drives first-expiry-first-out allocation. Null means no stated expiry.
+  expiresAt      DateTime? @map("expires_at") @db.Timestamptz(6)
+  receivedAt     DateTime  @default(now()) @map("received_at") @db.Timestamptz(6)
+
+  quantityOnHand   Int @default(0) @map("quantity_on_hand")
+  quantityReserved Int @default(0) @map("quantity_reserved")
+
+  /// Where the goods came from. Recorded, not verified.
+  supplier          String?
+  supplierReference String? @map("supplier_reference")
+
+  notes String?
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  inventoryItem InventoryItem          @relation(fields: [inventoryItemId], references: [id], onDelete: Cascade)
+  events        BatchEvent[]
+  reservations  InventoryReservation[]
+  documents     ProductDocument[]
+  recallLots    RecallLot[]
+
+  @@unique([inventoryItemId, lotCode])
+  @@index([inventoryItemId, status, expiresAt])
+  @@index([status, expiresAt])
+  @@map("inventory_batches")
+}
+
+/// Every disposition change a lot has been through.
+///
+/// Append-only. "Why was this stock blocked, by whom, and when was it
+/// released?" is a question a regulator asks, and an answer that could have
+/// been edited afterwards is not an answer.
+model BatchEvent {
+  id      String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  batchId String @map("batch_id") @db.Uuid
+
+  type          String
+  fromStatus    BatchStatus? @map("from_status")
+  toStatus      BatchStatus? @map("to_status")
+  quantityDelta Int?         @map("quantity_delta")
+  /// Required. There is no such thing as quarantining stock for no reason.
+  reason        String
+
+  actorId    String? @map("actor_id") @db.Uuid
+  actorLabel String? @map("actor_label")
+  isSystem   Boolean @default(false) @map("is_system")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  batch InventoryBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  @@index([batchId, createdAt])
+  @@map("batch_events")
+}
+
+enum RecallClassification {
+  CLASS_I
+  CLASS_II
+  CLASS_III
+  UNCLASSIFIED
+}
+
+enum RecallStatus {
+  DRAFT
+  OPEN
+  NOTIFICATION_APPROVED
+  CLOSED
+  CANCELLED
+}
+
+/// A recall of specific lots.
+///
+/// Opening one blocks the affected stock immediately. Contacting customers is a
+/// *separate* transition, requiring a separate permission and a second factor,
+/// because notifying people that a product they consumed is being recalled has
+/// legal consequences and must not be reachable by clicking through screens.
+///
+/// Nothing in this system sends anything to a customer. It derives who is
+/// affected and records that a named person approved contacting them.
+model Recall {
+  id        String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  reference String @unique
+
+  status         RecallStatus         @default(DRAFT)
+  classification RecallClassification @default(UNCLASSIFIED)
+
+  title  String
+  /// Why the recall was opened. Required.
+  reason String
+  /// The hazard, in the words of whoever assessed it. Never generated.
+  hazard String?
+
+  /// Set when a regulator was notified, by a person who did it.
+  regulatorNotifiedAt DateTime? @map("regulator_notified_at") @db.Timestamptz(6)
+  regulatorReference  String?   @map("regulator_reference")
+
+  openedById    String?   @map("opened_by_id") @db.Uuid
+  openedByLabel String?   @map("opened_by_label")
+  openedAt      DateTime? @map("opened_at") @db.Timestamptz(6)
+
+  /// Who approved contacting customers, and when. Both null until they did.
+  notificationApprovedById    String?   @map("notification_approved_by_id") @db.Uuid
+  notificationApprovedByLabel String?   @map("notification_approved_by_label")
+  notificationApprovedAt      DateTime? @map("notification_approved_at") @db.Timestamptz(6)
+
+  closedAt DateTime? @map("closed_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  lots    RecallLot[]
+  actions RecallAction[]
+
+  @@index([status, createdAt])
+  @@map("recalls")
+}
+
+/// A lot included in a recall.
+///
+/// Records the status the lot held before the recall, so cancelling a recall
+/// opened in error restores what was actually there rather than guessing
+/// `AVAILABLE`.
+model RecallLot {
+  id       String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  recallId String @map("recall_id") @db.Uuid
+  batchId  String @map("batch_id") @db.Uuid
+
+  previousStatus   BatchStatus @map("previous_status")
+  /// On-hand at the moment the lot was pulled into the recall.
+  quantityAtRecall Int         @map("quantity_at_recall")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  recall Recall         @relation(fields: [recallId], references: [id], onDelete: Cascade)
+  batch  InventoryBatch @relation(fields: [batchId], references: [id], onDelete: Restrict)
+
+  @@unique([recallId, batchId])
+  @@index([batchId])
+  @@map("recall_lots")
+}
+
+/// Everything that has happened on a recall.
+///
+/// Append-only, and the regulatory record of the response. Retained
+/// indefinitely; the application has no route that deletes one.
+model RecallAction {
+  id       String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  recallId String @map("recall_id") @db.Uuid
+
+  type    String
+  message String
+  /// Structured context. Never customer health information.
+  data    Json?
+
+  actorId    String? @map("actor_id") @db.Uuid
+  actorLabel String? @map("actor_label")
+  isSystem   Boolean @default(false) @map("is_system")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  recall Recall @relation(fields: [recallId], references: [id], onDelete: Cascade)
+
+  @@index([recallId, createdAt])
+  @@map("recall_actions")
 }

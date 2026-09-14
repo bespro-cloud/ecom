@@ -75,7 +75,7 @@ Changing a role assignment or a system setting requires a written reason, stored
 with the before and after state. "Why does this account have this access?" has an
 answer.
 
-### Publishing gate (built, Phase 2 — two checks await Phase 4)
+### Publishing gate (built, Phase 2 — fully enforced from Phase 4)
 
 A product cannot become publicly visible until a checklist passes. The gate is a
 hard block, not a warning, and it is evaluated server-side at the moment of the
@@ -94,15 +94,21 @@ publish a listing that has since lost its approval.
 | SEO metadata         | Phase 2   | Present and within displayed lengths                  |
 | Categorised          | Phase 2   | At least one, with a primary for the canonical URL    |
 | Compliance approved  | Phase 2   | Signed off, and not expired                           |
-| Claims reviewed      | Phase 4   | Reported `NOT_YET_ENFORCED` until then                |
-| Evidence reviewed    | Phase 4   | Reported `NOT_YET_ENFORCED` until then                |
+| Claims reviewed      | Phase 4   | Every recorded claim approved, unexpired and unedited |
+| Evidence reviewed    | Phase 4   | Each approved claim has accepted supporting evidence  |
 | Inventory configured | Phase 3   | Every sellable variant stocked in an active warehouse |
 
-**Nothing passes by omission.** A check whose domain does not exist yet reports
-`NOT_YET_ENFORCED` and is listed explicitly, on the API and on the admin screen.
-It does not block — nobody could satisfy it — but it is never counted as a pass.
-A checklist that quietly approves is worse than no checklist, because it looks
-like assurance.
+**Nothing passes by omission.** Every declared check now has a real evaluation
+behind it; none report `NOT_YET_ENFORCED`. The mechanism stays in place for
+checks added in future: one whose domain does not exist yet is listed explicitly
+rather than counted as a pass, on the API and on the admin screen. A checklist
+that quietly approves is worse than no checklist, because it looks like
+assurance.
+
+**And no check claims more than it verifies.** `CLAIMS_REVIEWED` checks the
+claims someone recorded — it does not scan marketing copy for unrecorded ones —
+and its reported detail says exactly that. A gate that let a green tick imply
+automated claim detection would be worse than one that admits its scope.
 
 **Which checks are required is configuration**, held in
 `catalog.publish_checklist_relaxed`. What a business must verify before
@@ -137,6 +143,25 @@ new warning on any ingredient the product contains. The last is deliberately
 blunt — deciding which changes to safety information are minor enough to skip is
 not a judgement this system is entitled to make.
 
+### Compliance history (built, Phase 4)
+
+Four more histories are append-only at the database level, enforced by triggers
+that reject `UPDATE` and `DELETE`:
+
+- **Claim versions** — the exact words a reviewer approved. Substantiation is a
+  statement about specific words; if those words can change afterwards, the
+  approval means nothing.
+- **Claim decisions** — who approved what, on which version, on what evidence,
+  and why. The evidence file is snapshotted into the decision, so "what was this
+  approved on?" is answerable after the file grows.
+- **Lot events** — every disposition change, with the reason. "Why was this stock
+  blocked, by whom, and when was it released?" is a question a regulator asks,
+  and an answer that could have been edited afterwards is not an answer.
+- **Recall actions** — the regulatory record of a recall response, retained
+  indefinitely. The application has no route that deletes one; lots cannot be
+  removed from a recall's scope either, because which lots were withdrawn is the
+  recall's factual core.
+
 ### Order, payment and stock history (built, Phase 3)
 
 Three more histories are append-only at the database level, enforced by triggers
@@ -170,39 +195,147 @@ zero with `taxRateApplied: null` so the two are distinguishable. This is not a
 sales tax determination and must not be treated as one; taking real money
 requires a tax engine integration first. See the Phase 3 notes in the roadmap.
 
-### Claim lifecycle (Phase 4)
+### Claim lifecycle (built, Phase 4)
 
 ```
 DRAFT → EVIDENCE_REQUIRED → UNDER_REVIEW → APPROVED
-                                        ↘ REJECTED
+                                        ↘ REJECTED (terminal)
                             APPROVED → EXPIRED (review interval elapsed)
+                            any state → WITHDRAWN (terminal)
 ```
 
-An approved claim is never overwritten. Editing one creates a new version
-retaining the previous text, the new text, who changed it, when, why, the
-evidence, and the approval history. Approvals expire on a configurable interval
-(`compliance.claims_review_interval_days`) so a claim approved years ago against
-since-superseded evidence does not stay live by default.
+There is deliberately **no edge from `APPROVED` back to `DRAFT`**. Changing the
+words of an approved claim is a new version, not a mutation of the approved one:
+the claim record points at a version, revising moves the _current_ pointer, and
+the _approved_ pointer stays exactly where it was. The listing renders the
+approved version, so an edit in progress cannot reach a customer.
 
-### Evidence (Phase 4)
+Rejection is terminal. A rejected claim is answered by writing a different claim,
+not by re-submitting the same wording until a reviewer says yes.
 
-Each record captures source type (RCT, systematic review, meta-analysis,
-observational, lab, manufacturer data, regulatory, other), citation, study type,
-population, dosage, duration, outcome, **limitations**, relevance, and who
-reviewed it.
+A decision names the version it applies to and is refused if the wording moved
+underneath. An approval that silently attached to a later edit would be a
+signature on text the signatory never read.
 
-Limitations are a required field. Evidence without stated limitations tends to
-be evidence being oversold.
+Approvals lapse after `compliance.claims_review_interval_days`. An hourly sweep
+expires them; the claim then disappears from the listing while the product stays
+up, because pulling a whole page down over one lapsed sentence is a far bigger
+customer impact than the lapse represents. The publishing gate separately refuses
+to re-publish a listing carrying one.
 
-### Traceability and recall (Phase 4)
+**What the gate does and does not check.** `CLAIMS_REVIEWED` verifies that every
+claim _someone recorded_ is approved, unexpired and unedited since approval. It
+does **not** read the product description and decide whether it contains an
+unrecorded claim. That inference about regulated speech is not one this software
+makes, and it would fail in the direction nobody notices — the claim it missed is
+exactly the one that goes out unreviewed. The human compliance review is where
+someone attests the copy makes no claims beyond those recorded, and the check's
+own detail text says so rather than letting a green tick imply more.
 
-Stock is tracked by batch and lot with manufacture and expiry dates. Allocation
-is first-expiry-first-out and excludes expired, quarantined and recalled stock.
+**A disease claim cannot be approved.** It is refused on category alone, however
+much evidence is attached, because no amount of substantiation makes one lawful
+on a supplement listing without the product being regulated as a drug. Recording
+it is how the refusal stays on file.
 
-When a lot is recalled the system stops allocation, quarantines remaining stock,
-and derives affected products → orders → customers. It does **not** contact
-anyone automatically: customer notification during a recall is a decision with
-legal consequences, and it requires explicit approval.
+### Evidence (built, Phase 4)
+
+Each record captures source type (systematic review, meta-analysis, RCT,
+observational, in vitro, animal, manufacturer data, regulatory guidance,
+monograph, other), citation, identifier, population, dosage, duration, outcome,
+**limitations**, and who added and reviewed it.
+
+**Every field is typed by the person who read the source.** Nothing is fetched
+from a DOI, nothing is summarised from a title, and there is no route that
+populates `outcome` or `limitations` from anything. A system that generated the
+finding a health claim rests on would be manufacturing substantiation, and it
+would do it in the most convincing possible format.
+
+Limitations are required, with a real minimum length in validation and again as a
+database `CHECK`. Evidence without stated limitations tends to be evidence being
+oversold, and it is the field that gets left blank first.
+
+Relevance lives on the claim↔evidence link rather than on the evidence, because
+the same trial can be direct support for one claim and background for another.
+`CONTRADICTORY` is a value a reviewer records on purpose — a substantiation file
+containing only supportive studies is a sales document, not a review — and it
+cannot be what an approval rests on.
+
+Evidence is a shared library. A single trial commonly supports several claims
+across several products; copying it per claim means a correction has to be made
+in several places, which is how substantiation files go stale. Reviewed evidence
+cannot be edited: approvals rest on what it said, so a correction is a new record
+and the claim is re-reviewed against it.
+
+**There is no score.** The system counts accepted supporting sources; it does not
+weigh whether a study supports a sentence. That judgement is the reviewer's job
+and the whole substance of it, and a confidence figure would look like the
+software had formed a view people would then rely on.
+
+### Documents (built, Phase 4)
+
+Certificates of analysis, GMP certificates, third-party test reports, allergen
+statements and the rest are uploaded files with human-entered metadata, held
+against a product or a specific lot.
+
+**The system records what a person said a document is.** It does not verify the
+issuer, does not check a certificate against any registry, and must never be read
+as evidence that a certification is genuine or current. The API returns
+`issuerAsStated` rather than `issuer`, and every document carries
+`verification: "NOT_VERIFIED_BY_THIS_SYSTEM"` so no screen can imply otherwise.
+
+A document past its stated expiry is reported as expired rather than quietly
+omitted — a certificate that lapsed eight months ago is a finding, not an
+absence. Superseding is a link, not an edit: the document that was current when a
+particular lot shipped stays identifiable afterwards, which is the question an
+investigation actually asks.
+
+### Traceability and recall (built, Phase 4)
+
+Stock is tracked by lot with manufacture and expiry dates. Allocation is
+first-expiry-first-out and excludes expired, quarantined and recalled stock — the
+filter is in the SQL that selects lots, not in a parameter a caller could widen.
+An undated lot sorts last, not first: "no expiry recorded" is not evidence of
+freshness.
+
+A lot-tracked stock record with no allocatable lot **refuses to allocate**.
+Shipping a regulated product without being able to say which lot it came from
+defeats the point of tracking lots, so the refusal is the correct outcome rather
+than a gap.
+
+Quarantine and release each require a written basis, recorded in an append-only
+ledger. Releasing is the more dangerous of the two to have no record of. Recalled
+and expired stock can never return to sale; correcting a mistaken recall means
+receiving the goods again as a new lot, with the receipt recorded.
+
+**When a lot is recalled, the system stops allocation and quarantines the
+remaining stock automatically.** That asymmetry is deliberate: stock that may be
+unsafe should stop being sold the moment somebody with the authority says so, and
+requiring a second approval to _stop selling_ would get the risk the wrong way
+round.
+
+**It does not contact anyone.** Given the recalled lots it derives the affected
+orders and customers — the join that lot tracking exists to make possible — and
+then withholds every identity until a named person approves contacting them.
+Before approval the console shows counts only: enough to assess scale and brief a
+regulator, not enough to reach anybody. The withholding is enforced in the
+service, so no route, screen or export gets the identities by asking differently,
+and reading the impact is itself recorded on the recall whether or not identities
+were disclosed.
+
+Approval requires a separate permission (`RECALL_NOTIFY`, held by compliance
+reviewers and deliberately not by `ADMIN` or the warehouse), a second factor, a
+written basis, and an acknowledgement typed verbatim rather than ticked. A
+checkbox is exactly how someone arrives at this decision by clicking through
+screens.
+
+Approving still sends nothing. There is no transactional email in this platform;
+when there is, dispatch must remain a further explicit act and not a consequence
+of approval.
+
+Closing a recall does not put the stock back: closing records that the response
+is finished, not that the goods turned out to be fine. Cancelling restores each
+lot to the status it held _before_ the recall, and is unavailable once contact
+has been approved.
 
 ## What AI may and may not do (Phase 7)
 
@@ -232,15 +365,16 @@ worse than no answer.
 
 ## Records to retain
 
-| Record                       | Retained     | Why                           |
-| ---------------------------- | ------------ | ----------------------------- |
-| Claim approvals and versions | Indefinitely | Substantiation history        |
-| Evidence and reviews         | Indefinitely | Substantiation history        |
-| Batch and lot records        | Per policy   | Traceability, recall scope    |
-| Recall actions               | Indefinitely | Regulatory record             |
-| Audit log                    | Per policy   | Who did what, when            |
-| Consent ledger               | Per policy   | Proof of permission           |
-| Order and payment records    | Per tax law  | Financial and tax obligations |
+| Record                       | Retained     | Why                                |
+| ---------------------------- | ------------ | ---------------------------------- |
+| Claim approvals and versions | Indefinitely | Substantiation history             |
+| Evidence and reviews         | Indefinitely | Substantiation history             |
+| Claim versions and decisions | Indefinitely | The exact words that were approved |
+| Batch and lot records        | Per policy   | Traceability, recall scope         |
+| Recall actions               | Indefinitely | Regulatory record                  |
+| Audit log                    | Per policy   | Who did what, when                 |
+| Consent ledger               | Per policy   | Proof of permission                |
+| Order and payment records    | Per tax law  | Financial and tax obligations      |
 
 "Per policy" means: decided with counsel, then implemented as a privileged
 out-of-band job. The application itself cannot delete these — see

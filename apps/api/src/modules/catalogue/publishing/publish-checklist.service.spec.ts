@@ -71,6 +71,16 @@ function build(
     relaxed?: PublishCheckKey[] | null;
     /** What the warehouse lookup should report for this product. */
     stocked?: boolean;
+    /** Recorded claims. Empty by default: a listing that makes none. */
+    claims?: Array<{
+      id: string;
+      status: string;
+      type: string;
+      reviewDueAt: Date | null;
+      approvedVersionId: string | null;
+      currentVersionId: string | null;
+      evidenceLinks?: Array<{ relevance: string; evidence: { status: string } }>;
+    }>;
   } = {},
 ): Harness {
   let seo =
@@ -84,6 +94,25 @@ function build(
   const prisma = {
     product: { findFirst: jest.fn(async () => product) },
     seoMetadata: { findUnique: jest.fn(async () => seo) },
+    // Claims are a database question like stock is, so they are stubbed here
+    // and covered against real rows in the integration suite. The default is an
+    // empty list: a listing with no recorded claims, which passes the claims
+    // check and says so.
+    productClaim: {
+      // Honours the status filter the real queries use. A stub that returned
+      // every claim regardless would hand the evidence check rows the real
+      // query excludes, and the test would pass or fail for the wrong reason.
+      findMany: jest.fn(async (args: { where?: { status?: unknown } }) => {
+        const all = options.claims ?? [];
+        const status = args?.where?.status;
+        if (status === 'APPROVED') return all.filter((claim) => claim.status === 'APPROVED');
+        if (status && typeof status === 'object' && 'notIn' in status) {
+          const excluded = (status as { notIn: string[] }).notIn;
+          return all.filter((claim) => !excluded.includes(claim.status));
+        }
+        return all;
+      }),
+    },
   } as unknown as PrismaService;
 
   const settings = {
@@ -139,20 +168,65 @@ describe('PublishChecklistService', () => {
     );
   });
 
-  it('reports unbuilt checks as not-yet-enforced rather than as passes', async () => {
+  it('has no checks left unenforced, now that every declared one is built', async () => {
     const { service } = build(compliantSupplement());
     const readiness = await service.evaluate('product-1');
 
-    // Claims and evidence arrive in Phase 4, inventory in Phase 3. Counting
-    // them as passes would make the checklist look like assurance it is not.
-    // Inventory moved from declared to enforced in Phase 3; claims and
-    // evidence arrive in Phase 4.
-    expect(readiness.notYetEnforced.sort()).toEqual(['CLAIMS_REVIEWED', 'EVIDENCE_REVIEWED']);
-    for (const key of readiness.notYetEnforced) {
-      expect(stateOf(readiness.checks, key)).toBe('NOT_YET_ENFORCED');
-    }
-    // They do not block: nobody could satisfy them yet.
+    // Inventory became enforceable in Phase 3, claims and evidence in Phase 4.
+    // Anything still reported here would be a check nobody could satisfy.
+    expect(readiness.notYetEnforced).toEqual([]);
     expect(readiness.ready).toBe(true);
+  });
+
+  it('blocks on a recorded claim that nobody approved', async () => {
+    const { service } = build(compliantSupplement(), {
+      claims: [
+        {
+          id: 'claim-1',
+          status: 'DRAFT',
+          type: 'STRUCTURE_FUNCTION',
+          reviewDueAt: null,
+          approvedVersionId: null,
+          currentVersionId: 'v1',
+        },
+      ],
+    });
+    const readiness = await service.evaluate('product-1');
+
+    expect(stateOf(readiness.checks, 'CLAIMS_REVIEWED')).toBe('FAIL');
+    expect(readiness.ready).toBe(false);
+  });
+
+  it('blocks on an approved claim whose wording changed afterwards', async () => {
+    // The listing would still show the approved text, but publishing in this
+    // state ships a page the admin screen does not match.
+    const { service } = build(compliantSupplement(), {
+      claims: [
+        {
+          id: 'claim-1',
+          status: 'APPROVED',
+          type: 'GENERAL',
+          reviewDueAt: null,
+          approvedVersionId: 'v1',
+          currentVersionId: 'v2',
+          evidenceLinks: [],
+        },
+      ],
+    });
+    const readiness = await service.evaluate('product-1');
+
+    expect(stateOf(readiness.checks, 'CLAIMS_REVIEWED')).toBe('FAIL');
+  });
+
+  it('says what the claims check does not cover, rather than implying more', async () => {
+    // A green tick here must not read as "we checked the marketing copy for
+    // claims". It checks the claims someone recorded, and says so.
+    const { service } = build(compliantSupplement());
+    const readiness = await service.evaluate('product-1');
+
+    const check = readiness.checks.find((entry) => entry.key === 'CLAIMS_REVIEWED');
+    expect(check?.state).toBe('PASS');
+    expect(check?.detail).toMatch(/no claims are recorded/i);
   });
 
   it('throws for a product that does not exist', async () => {

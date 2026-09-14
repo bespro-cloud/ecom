@@ -234,24 +234,114 @@ the same way as an MFA-verified administrator.
 
 ---
 
-## Phase 4 — Compliance 🔜 Next
+## Phase 4 — Compliance ✅ Complete
 
 The reason this platform is custom rather than off the shelf.
 
-- Product claims with versioning; approved history is never overwritten
-- Evidence records: study type, population, dosage, duration, outcome,
-  limitations
-- Compliance review workflow with recorded sign-off
-- Product documents and certificates
-- Batch and lot tracking with expiry dates
-- FEFO allocation excluding expired, quarantined and recalled stock
-- Quarantine and release
-- Recall management: affected batches → orders → customers, with approval
-  required before any customer is contacted
+**Delivered**
+
+- Product claims as explicit, versioned records with a lifecycle
+  (`DRAFT → EVIDENCE_REQUIRED → UNDER_REVIEW → APPROVED`), where approved
+  wording is never overwritten — revising writes a new version and the approved
+  one stays byte-for-byte as it was signed off
+- Evidence as a shared library: source type, citation, population, dosage,
+  duration, outcome and **limitations**, every field typed by the person who
+  read the study
+- Claim review with recorded sign-off by a named MFA-verified reviewer, against
+  a named version, with the evidence file snapshotted into the decision
+- Product and lot documents — certificates of analysis, GMP certificates, test
+  reports — recorded as _stated by the uploader_ and never as verified
+- Lots with manufacture and expiry dates, quantities and an append-only
+  disposition history
+- First-expiry-first-out allocation that excludes expired, quarantined and
+  recalled stock, and refuses rather than shipping something unidentifiable
+- Quarantine and release, each requiring a written basis that cannot be edited
+- Recalls: opening one withdraws affected lots from sale immediately, derives
+  which orders received them, and requires a separate, MFA-gated approval with a
+  typed acknowledgement before a single customer identity is disclosed
+- `CLAIMS_REVIEWED` and `EVIDENCE_REVIEWED` turned on, leaving no declared check
+  unenforced
+- Admin console for claims, evidence, lots and recalls; approved claims rendered
+  on the storefront in their approved wording
+- Hourly sweeps that expire lapsed claim approvals and withdraw out-of-date lots
+
+**The rules that shaped it**
+
+**Nothing is ever inferred.** A claim exists because a person wrote it down; the
+system does not read marketing copy and decide it contains one. That inference
+about regulated speech would fail in the direction nobody notices — the claim it
+missed is exactly the one that goes out unreviewed. So the gate guarantees no
+_recorded_ claim reaches a customer unapproved, and says so in those words
+rather than letting a green tick imply more.
+
+**Nothing is ever manufactured.** No evidence field is fetched from a DOI or
+summarised from a title. No certificate is verified. No recall classification is
+computed from a free-text reason. Each of those would be the software inventing
+a regulatory fact, in the most convincing possible format.
+
+**Approved history is never rewritten.** Claim versions, claim decisions, lot
+events and recall actions are append-only, enforced by database triggers that
+reject `UPDATE` and `DELETE` regardless of what the application asks for.
+
+**Withdrawing stock is automatic; contacting customers is not.** Opening a
+recall blocks the affected lots the moment somebody with the authority says so —
+waiting on an approval to _stop selling_ would get the risk backwards. Telling
+people they consumed a recalled product is the decision with legal consequences,
+so it has its own permission (`RECALL_NOTIFY`), a second factor, a typed
+acknowledgement, and a required written basis. Until it is given, the console
+reports counts and withholds identities. **This system sends nothing to anyone.**
+
+**Verified**
+
+| Suite                     | Count | Against                  |
+| ------------------------- | ----: | ------------------------ |
+| Shared package unit tests |   252 | pure logic               |
+| Storefront unit tests     |    45 | pure logic               |
+| API unit tests            |    67 | pure logic               |
+| Database integration      |    17 | real PostgreSQL          |
+| API integration (e2e)     |   231 | real PostgreSQL + Redis  |
+| Worker integration        |     9 | real PostgreSQL + BullMQ |
+
+The compliance suite proves the properties the phase exists for: a product
+manager and an administrator are each refused when they try to approve a claim;
+an approved version survives a revision byte-for-byte and the unapproved text
+never reaches the listing; a decision aimed at superseded wording is refused; a
+disease claim cannot be approved however much evidence is attached;
+contradictory evidence cannot substantiate a claim; FEFO picks the
+earliest-expiring lot and skips quarantined, recalled and expired stock; a
+lot-tracked item with no usable lot refuses to allocate rather than shipping
+something unidentifiable; and a recall withholds every customer identity until a
+named person with `RECALL_NOTIFY` approves contact — then discloses them, while
+queueing nothing that could reach a customer.
+
+**Not done in Phase 4**
+
+- **Claim detection in free text.** The gate checks recorded claims; it does not
+  scan descriptions for unrecorded ones, and deliberately does not try. A human
+  compliance review is where someone attests the copy makes no claims beyond
+  those recorded, and the checklist states that scope explicitly.
+- **Automated substantiation judgement.** The system counts accepted supporting
+  sources. It does not weigh whether a study supports a sentence — that is the
+  reviewer's job, and a confidence score would look like the software had formed
+  a view people would then rely on.
+- **Recall notification dispatch.** There is no transactional email in the
+  platform, so nothing is sent. When there is, dispatch must remain a further
+  explicit act rather than a consequence of approval.
+- **Document verification.** A certificate's issuer and dates are recorded as
+  claimed. Nothing checks them against a registry, and the API labels every
+  document `NOT_VERIFIED_BY_THIS_SYSTEM` so no screen can imply otherwise.
+- **Supplier and facility qualification**, and cGMP batch production records
+  (21 CFR 111 subparts E and J). Lots are tracked; the manufacturing records
+  behind them live in the manufacturer's systems.
+- **Adverse event reporting** (serious adverse event reports under DSHEA).
+  Not modelled.
+- **Automated browser E2E (Playwright).** Still verified against running
+  services by hand. Now four phases overdue.
+- **Load testing.** No performance claim is made anywhere.
 
 ---
 
-## Phase 5 — Customer lifecycle
+## Phase 5 — Customer lifecycle 🔜 Next
 
 Accounts, reviews with verified-purchase status, coupons, subscriptions,
 transactional email and SMS, support conversations.

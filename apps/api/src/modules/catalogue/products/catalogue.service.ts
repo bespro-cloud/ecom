@@ -118,6 +118,16 @@ export class CatalogueService {
         },
         warnings: { orderBy: [{ position: 'asc' }] },
         disclaimers: { orderBy: [{ position: 'asc' }] },
+        // Only approved claims, and only their approved wording. A claim that
+        // is drafted, under review, rejected, withdrawn or whose approval has
+        // lapsed does not exist as far as a customer is concerned — so the
+        // filter is in the query rather than in a `.filter()` afterwards, where
+        // a later refactor could quietly drop it.
+        claims: {
+          where: { status: 'APPROVED' },
+          orderBy: [{ position: 'asc' }],
+          include: { approvedVersion: { select: { text: true } } },
+        },
       },
     });
 
@@ -242,6 +252,15 @@ export class CatalogueService {
         source: warning.source,
       })),
       allergens,
+      claims: product.claims
+        // Belt and braces: an APPROVED claim always has an approved version —
+        // a database CHECK enforces it — but rendering `undefined` as a health
+        // claim is not a failure mode worth leaving to a constraint.
+        .filter((claim) => claim.approvedVersion !== null)
+        .map((claim) => ({
+          type: claim.type,
+          text: claim.approvedVersion!.text,
+        })),
       disclaimers: product.disclaimers.map((disclaimer) => ({
         kind: disclaimer.kind,
         text: disclaimer.text,
@@ -462,6 +481,13 @@ export interface PublicProductDetail {
     source: string | null;
   }>;
   allergens: string[];
+  /**
+   * Approved claims only, in their approved wording.
+   *
+   * There is no state in which this carries an unapproved claim: the query
+   * filters on status and reads the approved version, not the current one.
+   */
+  claims: Array<{ type: string; text: string }>;
   disclaimers: Array<{ kind: string; text: string }>;
   seo: {
     title: string;

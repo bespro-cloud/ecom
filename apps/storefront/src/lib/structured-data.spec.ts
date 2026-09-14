@@ -30,6 +30,7 @@ function product(overrides: Partial<ProductDetail> = {}): ProductDetail {
     ingredients: [],
     warnings: [],
     allergens: [],
+    claims: [],
     disclaimers: [],
     seo: {
       title: 'Magnesium Glycinate',

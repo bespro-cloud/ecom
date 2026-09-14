@@ -117,10 +117,58 @@ export const COMMERCE_AUDIT_ACTIONS = {
   SHIPMENT_UPDATED: 'shipment.updated',
 } as const;
 
+/**
+ * Compliance actions.
+ *
+ * Nearly all of these are worth surfacing unprompted, because the questions
+ * they answer — who approved this claim, who released that stock, who decided
+ * customers should be told — are the questions asked after something has gone
+ * wrong, by people who were not in the room.
+ */
+export const COMPLIANCE_AUDIT_ACTIONS = {
+  CLAIM_CREATED: 'claim.created',
+  CLAIM_REVISED: 'claim.revised',
+  CLAIM_SUBMITTED: 'claim.submitted',
+  CLAIM_APPROVED: 'claim.approved',
+  CLAIM_REJECTED: 'claim.rejected',
+  CLAIM_CHANGES_REQUESTED: 'claim.changes_requested',
+  CLAIM_WITHDRAWN: 'claim.withdrawn',
+  CLAIM_EXPIRED: 'claim.expired',
+
+  EVIDENCE_CREATED: 'evidence.created',
+  EVIDENCE_UPDATED: 'evidence.updated',
+  EVIDENCE_ACCEPTED: 'evidence.accepted',
+  EVIDENCE_REJECTED: 'evidence.rejected',
+  EVIDENCE_LINKED: 'evidence.linked',
+  EVIDENCE_UNLINKED: 'evidence.unlinked',
+
+  DOCUMENT_UPLOADED: 'document.uploaded',
+  DOCUMENT_SUPERSEDED: 'document.superseded',
+  DOCUMENT_ARCHIVED: 'document.archived',
+
+  BATCH_RECEIVED: 'batch.received',
+  BATCH_QUARANTINED: 'batch.quarantined',
+  BATCH_RELEASED: 'batch.released',
+  BATCH_DISPOSED: 'batch.disposed',
+  BATCH_EXPIRED: 'batch.expired',
+  LOT_TRACKING_CHANGED: 'batch.tracking.changed',
+
+  RECALL_CREATED: 'recall.created',
+  RECALL_OPENED: 'recall.opened',
+  RECALL_LOTS_ADDED: 'recall.lots.added',
+  RECALL_IMPACT_ASSESSED: 'recall.impact.assessed',
+  RECALL_NOTIFICATION_APPROVED: 'recall.notification.approved',
+  RECALL_NOTIFICATION_EXPORTED: 'recall.notification.exported',
+  RECALL_REGULATOR_NOTIFIED: 'recall.regulator.notified',
+  RECALL_CLOSED: 'recall.closed',
+  RECALL_CANCELLED: 'recall.cancelled',
+} as const;
+
 export const ALL_AUDIT_ACTIONS = {
   ...AUDIT_ACTIONS,
   ...CATALOGUE_AUDIT_ACTIONS,
   ...COMMERCE_AUDIT_ACTIONS,
+  ...COMPLIANCE_AUDIT_ACTIONS,
 } as const;
 
 export type AuditAction = (typeof ALL_AUDIT_ACTIONS)[keyof typeof ALL_AUDIT_ACTIONS];
@@ -157,4 +205,17 @@ export const NOTABLE_AUDIT_ACTIONS: readonly AuditAction[] = [
   COMMERCE_AUDIT_ACTIONS.REFUND_FAILED,
   COMMERCE_AUDIT_ACTIONS.ORDER_CANCELLED,
   COMMERCE_AUDIT_ACTIONS.INVENTORY_ADJUSTED,
+  // Compliance: what customers were told, and what shipped to them.
+  COMPLIANCE_AUDIT_ACTIONS.CLAIM_APPROVED,
+  COMPLIANCE_AUDIT_ACTIONS.CLAIM_REJECTED,
+  COMPLIANCE_AUDIT_ACTIONS.CLAIM_WITHDRAWN,
+  COMPLIANCE_AUDIT_ACTIONS.EVIDENCE_ACCEPTED,
+  COMPLIANCE_AUDIT_ACTIONS.BATCH_QUARANTINED,
+  COMPLIANCE_AUDIT_ACTIONS.BATCH_RELEASED,
+  COMPLIANCE_AUDIT_ACTIONS.RECALL_OPENED,
+  // The one action in the system that authorises contacting customers about a
+  // product they consumed. It should never be something anyone has to go
+  // looking for.
+  COMPLIANCE_AUDIT_ACTIONS.RECALL_NOTIFICATION_APPROVED,
+  COMPLIANCE_AUDIT_ACTIONS.RECALL_REGULATOR_NOTIFIED,
 ];

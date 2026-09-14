@@ -213,6 +213,31 @@ export default async function ProductPage({ params }: { params: Promise<{ slug: 
         <IngredientTable title="Other ingredients" entries={other} showAmounts={false} />
       ) : null}
 
+      {product.claims.length > 0 ? (
+        <section aria-labelledby="claims-heading" className="mt-12 max-w-prose">
+          <h2 id="claims-heading" className="text-xl font-semibold text-slate-900">
+            What this product is for
+          </h2>
+          {/*
+            Every statement here was individually approved by a named compliance
+            reviewer against recorded evidence, and this renders the exact
+            wording that was signed off — never a draft and never a revision in
+            progress. A claim whose approval has lapsed disappears from this
+            list rather than lingering.
+          */}
+          <ul className="mt-3 space-y-2">
+            {product.claims.map((claim, index) => (
+              <li
+                key={index}
+                className="rounded-lg bg-white p-4 text-base leading-relaxed text-slate-800 ring-1 ring-slate-200"
+              >
+                {claim.text}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
       {product.disclaimers.length > 0 ? (
         <section aria-labelledby="disclaimers-heading" className="mt-12 max-w-prose">
           <h2 id="disclaimers-heading" className="sr-only">

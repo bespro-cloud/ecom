@@ -129,6 +129,7 @@ export const SYSTEM_ROLES: readonly SystemRoleDefinition[] = [
       'COMPLIANCE_APPROVE',
       'RECALL_READ',
       'RECALL_MANAGE',
+      'RECALL_NOTIFY',
       'DOCUMENT_READ',
       'DOCUMENT_WRITE',
       'BATCH_READ',

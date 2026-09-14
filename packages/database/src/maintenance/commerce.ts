@@ -57,7 +57,7 @@ export async function releaseExpiredReservations(
 
   const expired = await prisma.inventoryReservation.findMany({
     where: { status: 'HELD', expiresAt: { lte: at } },
-    select: { id: true, inventoryItemId: true, quantity: true },
+    select: { id: true, inventoryItemId: true, quantity: true, batchId: true },
     take: limit,
   });
   if (expired.length === 0) return 0;
@@ -84,6 +84,16 @@ export async function releaseExpiredReservations(
           where: { id: reservation.inventoryItemId },
           data: { reservedQuantity: { decrement: reservation.quantity } },
         });
+        // Lot-tracked units were held against a specific lot, and the lot has
+        // to get them back. Releasing only the aggregate leaves the lot holding
+        // stock nobody is buying — drift that stays invisible until the lot
+        // reports empty while the units are still on the shelf.
+        if (reservation.batchId) {
+          await tx.inventoryBatch.update({
+            where: { id: reservation.batchId },
+            data: { quantityReserved: { decrement: reservation.quantity } },
+          });
+        }
         await tx.inventoryReservation.update({
           where: { id: reservation.id },
           data: { status: 'EXPIRED', releasedAt: at },
@@ -136,7 +146,7 @@ export async function expireStaleCheckouts(deps: MaintenanceDeps, limit = 200): 
 
         const held = await tx.inventoryReservation.findMany({
           where: { cartId: checkout.cartId, status: 'HELD' },
-          select: { id: true, inventoryItemId: true, quantity: true },
+          select: { id: true, inventoryItemId: true, quantity: true, batchId: true },
         });
 
         // Sorted, so concurrent releases of overlapping baskets always take
@@ -149,6 +159,12 @@ export async function expireStaleCheckouts(deps: MaintenanceDeps, limit = 200): 
             where: { id: reservation.inventoryItemId },
             data: { reservedQuantity: { decrement: reservation.quantity } },
           });
+          if (reservation.batchId) {
+            await tx.inventoryBatch.update({
+              where: { id: reservation.batchId },
+              data: { quantityReserved: { decrement: reservation.quantity } },
+            });
+          }
           await tx.inventoryReservation.update({
             where: { id: reservation.id },
             data: { status: 'RELEASED', releasedAt: at },

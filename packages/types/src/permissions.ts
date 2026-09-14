@@ -132,6 +132,10 @@ export const PERMISSIONS = [
   define('compliance', 'approve', 'Sign off a product compliance review'),
   define('recall', 'read', 'View recalls'),
   define('recall', 'manage', 'Open, progress and close a recall'),
+  // Separate from RECALL_MANAGE on purpose. Blocking stock is an operational
+  // act; telling customers their purchase is being recalled has legal
+  // consequences, and the two should not be the same authority.
+  define('recall', 'notify', 'Approve contacting customers about a recall'),
   define('document', 'read', 'View regulatory and product documents'),
   define('document', 'write', 'Upload and supersede regulatory documents'),
 
