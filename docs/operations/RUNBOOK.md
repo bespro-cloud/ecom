@@ -157,6 +157,7 @@ re-enable it.
 ## Outbox backlog
 
 **Alert:** `OutboxBacklog` — over 500 undispatched rows for 10 minutes.
+**Alert:** `OutboxDispatchFailures` — any row the dispatcher gave up on.
 
 The dispatcher is not draining. Nothing is lost — rows are durable — but emails
 and downstream work are not happening.
@@ -191,7 +192,7 @@ failed for a good reason.
 
 ## Dead-letter queue
 
-**Alert:** `DeadLetterQueueGrowing`
+**Alert:** `DeadLetterQueueGrowing`, `QueueJobFailureRate`, `QueueJobsSlow`
 
 Jobs that exhausted their retries, or failed permanently, are recorded on
 `<queue>-dlq`. Nothing retries out of it automatically — replay is an explicit
@@ -208,6 +209,56 @@ q.getJobs(['waiting']).then(js => { js.slice(0,10).forEach(j => console.log(j.id
 Read the failure reasons before replaying anything. A permanent failure (a
 rejected recipient) will fail again; a transient one (a provider outage) will
 not.
+
+`QueueJobFailureRate` fires earlier than this, on jobs that are failing and
+still retrying. `QueueJobsSlow` is the case where nothing is failing at all and
+work is simply arriving late — on these queues that means order confirmations
+and subscription billing, so it is a customer problem before it is an
+infrastructure one.
+
+---
+
+## Payment webhook rejected
+
+**Alerts:** `PaymentWebhookRejected` (4xx) and
+`PaymentWebhookProcessingFailing` (5xx).
+
+`POST /api/v1/webhooks/payments` is the one unauthenticated endpoint that moves
+money. The two alerts are different incidents and the distinction is the whole
+point of separating them.
+
+**4xx — the signature did not verify.** Two causes, and the boring one is far
+more likely:
+
+1. **The secret is stale.** Rotating an endpoint secret in the provider's
+   dashboard without updating `PAYMENT_WEBHOOK_SECRET` rejects every callback.
+   Customers are being charged and their orders are *not* being marked paid.
+   Check the provider's dashboard for the endpoint's current signing secret
+   before assuming anything else.
+2. **Someone is forging callbacks.** Genuine providers retry from known ranges
+   with well-formed payloads; forgeries usually do not. Check source addresses
+   in the access log for the route.
+
+Either way the rejection itself is correct behaviour — an unverified webhook
+must never mark an order paid. The damage is the backlog building up behind it.
+
+**5xx — the signature verified and processing failed.** The callback was
+genuine and this side could not record it. The provider will retry on its own
+schedule, so short bursts self-heal; a sustained rate means paid orders with no
+payment record here.
+
+```sql
+-- Callbacks the provider sent that this side has not accepted.
+SELECT provider, provider_event_id, created_at, last_error
+  FROM webhook_events
+ WHERE processed_at IS NULL
+ ORDER BY created_at DESC LIMIT 20;
+```
+
+Do **not** manually mark orders paid to clear a backlog. Fix the cause and let
+the provider redeliver — webhook handling is idempotent by provider event id,
+so redelivery is safe and a hand-edited order is a financial record nobody can
+reconcile later.
 
 ---
 
@@ -281,6 +332,10 @@ one that matters.
 
 Run quarterly. Put the date in the calendar; a backup that has never been
 restored is a hypothesis.
+
+This drill is what turns the recovery-time *estimates* in
+[DISASTER-RECOVERY.md](DISASTER-RECOVERY.md) into measurements. Until it has
+been run and timed, those numbers are guesses and that document says so.
 
 ```sh
 # 1. Restore the most recent backup into a scratch database
